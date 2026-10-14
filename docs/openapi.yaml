@@ -22,6 +22,8 @@ tags:
     description: Iesnieguma pieņemšana un apskate (R1–R3)
   - name: Sistēma
     description: Tehniskie galapunkti (R4)
+  - name: Lietotāji
+    description: Lietotāju reģistrācija un pieteikšanās (CR-4)
 
 paths:
   /health:
@@ -101,6 +103,98 @@ paths:
                 $ref: '#/components/schemas/Submission'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /auth/register:
+    post:
+      tags: [Lietotāji]
+      operationId: registerUser
+      summary: Reģistrēt lietotāju
+      description: |
+        Izveido lietotāja kontu (CR-4). `email` tiek saglabāts bez atstarpēm
+        sākumā un beigās un mazajiem burtiem. Parole tiek glabāta tikai kā
+        jaucējvērtība. Ne e-pasts, ne parole netiek rakstīti žurnālā.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+            example:
+              email: janis@example.com
+              password: drosa-parole-1
+      responses:
+        '201':
+          description: Konts izveidots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/CredentialsValidationError'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '409':
+          description: Lietotājs ar šādu e-pastu jau eksistē
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: ALREADY_EXISTS
+                  message: User already exists
+                  details:
+                    - field: email
+                      issue: ALREADY_EXISTS
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/login:
+    post:
+      tags: [Lietotāji]
+      operationId: loginUser
+      summary: Pieteikties
+      description: |
+        Pārbauda e-pastu un paroli (CR-4). Veiksmes gadījumā iestata sesijas
+        sīkdatni `session` (`HttpOnly`, `SameSite=Lax`). Nepareizai parolei un
+        nezināmam e-pastam atbilde ir vienāda.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+            example:
+              email: janis@example.com
+              password: drosa-parole-1
+      responses:
+        '200':
+          description: Pieteikšanās izdevusies
+          headers:
+            Set-Cookie:
+              description: Sesijas sīkdatne, piemēram, `session=…; HttpOnly; Path=/; SameSite=lax`
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/CredentialsValidationError'
+        '401':
+          description: Nepareizs e-pasts vai parole
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: INVALID_CREDENTIALS
+                  message: Invalid email or password
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
 components:
   schemas:
@@ -216,6 +310,37 @@ components:
       enum: [RECEIVED, IN_PROGRESS, FORWARDED, ANSWERED, WITHDRAWN]
       example: RECEIVED
 
+    Credentials:
+      type: object
+      description: |
+        Reģistrācijas un pieteikšanās dati (CR-4). Lauka kļūdas: `REQUIRED`,
+        `INVALID_FORMAT`, `TOO_SHORT` (tikai reģistrācijā, parole < 8 rakstzīmes).
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: janis@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          writeOnly: true
+          example: drosa-parole-1
+
+    User:
+      type: object
+      description: Lietotāja konts. Parole atbildē nekad netiek iekļauta.
+      required: [id, email]
+      properties:
+        id:
+          type: integer
+          example: 1
+        email:
+          type: string
+          format: email
+          example: janis@example.com
+
     Error:
       type: object
       description: Vienota kļūdu shēma visiem galapunktiem
@@ -271,3 +396,36 @@ components:
             error:
               code: NOT_FOUND
               message: Submission not found
+    CredentialsValidationError:
+      description: Kļūdains pieprasījums. Konts netiek izveidots, sesija netiek iestatīta.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details:
+                - field: password
+                  issue: TOO_SHORT
+    RouteNotFound:
+      description: Galapunkts nav atrasts
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Not found
+    InternalError:
+      description: Neparedzēta servera kļūda
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: Unexpected server error
