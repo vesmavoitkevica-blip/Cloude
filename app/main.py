@@ -1,7 +1,7 @@
-"""Lietotāji (CR-4), organizācijas (F1), mijiedarbības (F3) un pieprasījumi (F4).
+"""Lietotāji un lomas (CR-4, N3), organizācijas (F1), mijiedarbības (F3) un pieprasījumi (F4).
 
 Palaišana: `uvicorn --factory app.main:create_app --reload`, tad atver `/register`, `/login`,
-`/organizacijas` vai `/pieprasijumi`.
+`/organizacijas`, `/pieprasijumi` vai `/admin`.
 Datu bāzes fails: vides mainīgais `AUTH_DB_PATH` (noklusējums `auth.db`).
 """
 
@@ -9,19 +9,20 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.db import Database, DuplicateRegNumber
+from app.db import Database, DuplicateRegNumber, LastAdmin
 from app.security import (
     DUMMY_HASH,
     hash_password,
@@ -48,6 +49,9 @@ RequestStatus = Literal["NEW", "IN_PROGRESS", "ANSWERED"]
 MAX_TITLE_LENGTH = 200
 MAX_DESCRIPTION_LENGTH = 2000
 LOCAL_TIMEZONE = ZoneInfo("Europe/Riga")
+ROLES = ("EMPLOYEE", "MANAGER", "ADMIN")
+STAFF_ROLES = ("EMPLOYEE", "MANAGER")
+MAX_USER_NAME_LENGTH = 100
 
 
 def today() -> date:
@@ -63,6 +67,32 @@ class Credentials(BaseModel):
     # Lauku tipus pārbauda paši, lai kļūdas atbilstu līguma Error shēmai.
     email: Any = None
     password: Any = None
+
+
+class Registration(Credentials):
+    name: Any = None
+
+
+class RoleChange(BaseModel):
+    role: Any = None
+
+
+@dataclass(frozen=True)
+class User:
+    """Pieslēgtais lietotājs ar lomu, kas nolasīta šajā pieprasījumā (N3)."""
+
+    id: int
+    email: str
+    name: str | None
+    role: str
+
+    @property
+    def sees_all(self) -> bool:
+        """Vadītājs redz visu organizāciju datus; darbinieks tikai savu organizāciju."""
+        return self.role == "MANAGER"
+
+    def can_see(self, responsible_user_id: int) -> bool:
+        return self.sees_all or responsible_user_id == self.id
 
 
 class OrganizationInput(BaseModel):
@@ -96,6 +126,23 @@ def error(status: int, code: str, message: str, details: list[dict] | None = Non
 
 def validation_error(details: list[dict]) -> JSONResponse:
     return error(400, "VALIDATION_ERROR", "Request validation failed", details)
+
+
+def forbidden() -> JSONResponse:
+    return error(403, "FORBIDDEN", "Not allowed for this role")
+
+
+def user_json(row) -> dict[str, Any]:
+    return {"id": row["id"], "email": row["email"], "name": row["name"], "role": row["role"]}
+
+
+def check_user_name(value: Any) -> tuple[str | None, list[dict]]:
+    if value is not None and not isinstance(value, str):
+        return None, [{"field": "name", "issue": "INVALID_FORMAT"}]
+    name = optional_text(value)
+    if name is not None and len(name) > MAX_USER_NAME_LENGTH:
+        return None, [{"field": "name", "issue": "TOO_LONG"}]
+    return name, []
 
 
 def check_credentials(data: Credentials, check_length: bool) -> tuple[str, str, list[dict]]:
@@ -160,8 +207,11 @@ def check_organization(
     if responsible is not None:
         if not isinstance(responsible, int) or isinstance(responsible, bool):
             details.append({"field": "responsibleUserId", "issue": "INVALID_FORMAT"})
-        elif not is_valid_id(responsible) or not db.user_exists(responsible):
-            details.append({"field": "responsibleUserId", "issue": "NOT_FOUND"})
+        else:
+            # Atbildīgais var būt darbinieks vai vadītājs, ne administrators (N3).
+            user = db.get_user(responsible) if is_valid_id(responsible) else None
+            if user is None or user["role"] not in STAFF_ROLES:
+                details.append({"field": "responsibleUserId", "issue": "NOT_FOUND"})
 
     values = {
         "name": name.strip() if isinstance(name, str) else name,
@@ -240,8 +290,9 @@ def interaction_json(row) -> dict[str, Any]:
 
 
 def check_request(
-    data: RequestInput, db: Database, creating: bool
+    data: RequestInput, find_organization: Callable[[int], Any], creating: bool
 ) -> tuple[dict[str, Any], list[dict]]:
+    """`find_organization` atgriež organizāciju tikai tad, ja lietotājs to redz (N3)."""
     details: list[dict] = []
 
     if creating:
@@ -250,7 +301,7 @@ def check_request(
             details.append({"field": "organizationId", "issue": "REQUIRED"})
         elif not isinstance(org_id, int) or isinstance(org_id, bool):
             details.append({"field": "organizationId", "issue": "INVALID_FORMAT"})
-        elif not is_valid_id(org_id) or db.get_organization(org_id) is None:
+        elif find_organization(org_id) is None:
             details.append({"field": "organizationId", "issue": "NOT_FOUND"})
 
     title = data.title
@@ -348,18 +399,46 @@ def organization_not_found() -> JSONResponse:
 
 def create_app(db_path: str | None = None) -> FastAPI:
     db = Database(db_path or os.environ.get("AUTH_DB_PATH", "auth.db"))
-    app = FastAPI(title="Ezermalas pieteikumu sistēma · lietotāji (CR-4) un organizācijas (F1)")
+    app = FastAPI(title="Ezermalas CRM · lietotāji, lomas, organizācijas, mijiedarbības, pieprasījumi")
 
-    def session_user_id(request: Request) -> int | None:
+    def session_user(request: Request) -> User | None:
         token = request.cookies.get(SESSION_COOKIE)
-        return db.find_session_user_id(hash_session_token(token)) if token else None
+        row = db.find_session_user(hash_session_token(token)) if token else None
+        return User(row["id"], row["email"], row["name"], row["role"]) if row else None
 
-    def require_user(request: Request) -> int:
+    def require_user(request: Request) -> User:
         # Atkarība izpildās pirms ķermeņa un parametru pārbaudes, tāpēc bez sesijas vienmēr 401.
-        user_id = session_user_id(request)
-        if user_id is None:
+        user = session_user(request)
+        if user is None:
             raise HTTPException(status_code=401, detail="Authentication required")
-        return user_id
+        return user
+
+    def require_roles(*roles: str):
+        def dependency(user: User = Depends(require_user)) -> User:
+            if user.role not in roles:
+                raise HTTPException(status_code=403, detail="Not allowed for this role")
+            return user
+
+        return dependency
+
+    # Darba dati (organizācijas, mijiedarbības, pieprasījumi) nav pieejami administratoram.
+    require_staff = require_roles(*STAFF_ROLES)
+
+    def visible_organization(user: User, org_id: int):
+        row = db.get_organization(org_id) if is_valid_id(org_id) else None
+        return row if row and user.can_see(row["responsible_user_id"]) else None
+
+    def visible_interaction(user: User, interaction_id: int):
+        row = db.get_interaction(interaction_id) if is_valid_id(interaction_id) else None
+        return row if row and user.can_see(row["organization_responsible_id"]) else None
+
+    def visible_request(user: User, request_id: int):
+        row = db.get_request(request_id) if is_valid_id(request_id) else None
+        return row if row and user.can_see(row["organization_responsible_id"]) else None
+
+    def own_scope(user: User, mine: bool) -> int | None:
+        """Atbildīgā filtrs sarakstiem: darbiniekam vienmēr savs, vadītājam pēc `mine`."""
+        return user.id if mine or not user.sees_all else None
 
     @app.exception_handler(RequestValidationError)
     async def on_validation_error(request: Request, exc: RequestValidationError):
@@ -372,28 +451,34 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.exception_handler(StarletteHTTPException)
     async def on_http_error(request: Request, exc: StarletteHTTPException):
-        code = {401: "UNAUTHORIZED", 404: "NOT_FOUND"}.get(exc.status_code, "HTTP_ERROR")
+        code = {401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND"}.get(
+            exc.status_code, "HTTP_ERROR"
+        )
         return error(exc.status_code, code, str(exc.detail))
 
     @app.exception_handler(Exception)
     async def on_unexpected_error(request: Request, exc: Exception):
         return error(500, "INTERNAL_ERROR", "Unexpected server error")
 
+    # --- Lietotāji un lomas (CR-4, N3) ---
+
     @app.post("/auth/register", status_code=201)
-    def register(data: Credentials):
+    def register(data: Registration):
         email, password, details = check_credentials(data, check_length=True)
+        name, name_details = check_user_name(data.name)
+        details += name_details
         if details:
             return validation_error(details)
 
-        user_id = db.create_user(email, hash_password(password))
-        if user_id is None:
+        user = db.create_user(email, hash_password(password), name)
+        if user is None:
             return error(
                 409,
                 "ALREADY_EXISTS",
                 "User already exists",
                 [{"field": "email", "issue": "ALREADY_EXISTS"}],
             )
-        return JSONResponse(status_code=201, content={"id": user_id, "email": email})
+        return JSONResponse(status_code=201, content=user_json(user))
 
     @app.post("/auth/login")
     def login(data: Credentials):
@@ -408,22 +493,58 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         token, token_hash = new_session_token()
         db.create_session(token_hash, user["id"])
-        result = JSONResponse(content={"id": user["id"], "email": user["email"]})
+        result = JSONResponse(content=user_json(user))
         result.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
         return result
 
+    @app.post("/auth/logout", status_code=204)
+    def logout(request: Request):
+        token = request.cookies.get(SESSION_COOKIE)
+        if token:
+            db.delete_session(hash_session_token(token))
+        result = Response(status_code=204)
+        result.delete_cookie(SESSION_COOKIE, httponly=True, samesite="lax")
+        return result
+
+    @app.get("/auth/me")
+    def current_user(user: User = Depends(require_user)):
+        return {"id": user.id, "email": user.email, "name": user.name, "role": user.role}
+
+    @app.get("/users")
+    def list_users(user: User = Depends(require_roles("MANAGER", "ADMIN"))):
+        return [user_json(row) for row in db.list_users()]
+
+    @app.put("/users/{id}/role")
+    def change_role(id: int, data: RoleChange, user: User = Depends(require_roles("ADMIN"))):
+        if data.role is None or data.role == "":
+            return validation_error([{"field": "role", "issue": "REQUIRED"}])
+        if data.role not in ROLES:
+            return validation_error([{"field": "role", "issue": "INVALID_FORMAT"}])
+        try:
+            row = db.set_role(id, data.role) if is_valid_id(id) else None
+        except LastAdmin:
+            return error(409, "LAST_ADMIN", "At least one administrator is required")
+        if row is None:
+            return error(404, "NOT_FOUND", "User not found")
+        return user_json(row)
+
+    # --- Organizācijas (F1) ---
+
     @app.get("/organizations")
-    def list_organizations(q: str | None = None, mine: bool = False, user_id: int = Depends(require_user)):
-        rows = db.search_organizations(q.strip() if q else None, user_id if mine else None)
+    def list_organizations(q: str | None = None, mine: bool = False, user: User = Depends(require_staff)):
+        rows = db.search_organizations(q.strip() if q else None, own_scope(user, mine))
         return [organization_json(row) for row in rows]
 
     @app.post("/organizations", status_code=201)
-    def create_organization(data: OrganizationInput, user_id: int = Depends(require_user)):
+    def create_organization(data: OrganizationInput, user: User = Depends(require_staff)):
         values, details = check_organization(data, db)
         if details:
             return validation_error(details)
-        if values["responsible_user_id"] is None:
-            values["responsible_user_id"] = user_id
+        responsible = values["responsible_user_id"]
+        if responsible is None:
+            values["responsible_user_id"] = user.id
+        elif responsible != user.id and not user.sees_all:
+            return forbidden()
         try:
             row = db.create_organization(**values)
         except DuplicateRegNumber:
@@ -431,70 +552,79 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return JSONResponse(status_code=201, content=organization_json(row))
 
     @app.get("/organizations/{id}")
-    def get_organization(id: int, user_id: int = Depends(require_user)):
-        row = db.get_organization(id) if is_valid_id(id) else None
+    def get_organization(id: int, user: User = Depends(require_staff)):
+        row = visible_organization(user, id)
         return organization_json(row) if row else organization_not_found()
 
     @app.put("/organizations/{id}")
-    def update_organization(id: int, data: OrganizationInput, user_id: int = Depends(require_user)):
+    def update_organization(id: int, data: OrganizationInput, user: User = Depends(require_staff)):
         # Neesošai organizācijai 404 pirms datu pārbaudes: nav ko pārbaudīt, ja ieraksta nav.
-        if not is_valid_id(id) or db.get_organization(id) is None:
+        existing = visible_organization(user, id)
+        if existing is None:
             return organization_not_found()
         values, details = check_organization(data, db)
         if details:
             return validation_error(details)
+        responsible = values["responsible_user_id"]
+        if responsible not in (None, existing["responsible_user_id"]) and not user.sees_all:
+            return forbidden()
         try:
             row = db.update_organization(id, **values)
         except DuplicateRegNumber:
             return reg_number_conflict()
         return organization_json(row) if row else organization_not_found()
 
-    @app.get("/auth/me")
-    def current_user(user_id: int = Depends(require_user)):
-        user = db.get_user(user_id)
-        return {"id": user["id"], "email": user["email"]}
+    # --- Mijiedarbības (F3) ---
 
     @app.get("/organizations/{id}/interactions")
-    def list_organization_interactions(id: int, user_id: int = Depends(require_user)):
-        if not is_valid_id(id) or db.get_organization(id) is None:
+    def list_organization_interactions(id: int, user: User = Depends(require_staff)):
+        if visible_organization(user, id) is None:
             return organization_not_found()
         return [interaction_json(row) for row in db.organization_interactions(id)]
 
     @app.post("/organizations/{id}/interactions", status_code=201)
-    def create_interaction(id: int, data: InteractionInput, user_id: int = Depends(require_user)):
-        if not is_valid_id(id) or db.get_organization(id) is None:
+    def create_interaction(id: int, data: InteractionInput, user: User = Depends(require_staff)):
+        org = visible_organization(user, id)
+        if org is None:
             return organization_not_found()
+        # Reģistrē tikai organizācijas atbildīgais; vadītājs citām tikai skatās (N3).
+        if org["responsible_user_id"] != user.id:
+            return forbidden()
         values, details = check_interaction(data)
         if details:
             return validation_error(details)
-        row = db.create_interaction(organization_id=id, author_id=user_id, **values)
+        row = db.create_interaction(organization_id=id, author_id=user.id, **values)
         return JSONResponse(status_code=201, content=interaction_json(row))
 
     @app.get("/interactions")
     def list_interactions(
         mine: bool = False,
         limit: int = Query(50, ge=1, le=100),
-        user_id: int = Depends(require_user),
+        user: User = Depends(require_staff),
     ):
-        rows = db.latest_interactions(user_id if mine else None, limit)
+        rows = db.latest_interactions(
+            user.id if mine else None, limit, None if user.sees_all else user.id
+        )
         return [interaction_json(row) for row in rows]
 
     @app.get("/interactions/{id}")
-    def get_interaction(id: int, user_id: int = Depends(require_user)):
-        row = db.get_interaction(id) if is_valid_id(id) else None
+    def get_interaction(id: int, user: User = Depends(require_staff)):
+        row = visible_interaction(user, id)
         return interaction_json(row) if row else interaction_not_found()
 
     @app.put("/interactions/{id}")
-    def update_interaction(id: int, data: InteractionInput, user_id: int = Depends(require_user)):
-        existing = db.get_interaction(id) if is_valid_id(id) else None
+    def update_interaction(id: int, data: InteractionInput, user: User = Depends(require_staff)):
+        existing = visible_interaction(user, id)
         if existing is None:
             return interaction_not_found()
-        if existing["author_id"] != user_id:
-            return error(403, "FORBIDDEN", "Only the author can edit this interaction")
+        if existing["author_id"] != user.id:
+            return forbidden()
         values, details = check_interaction(data)
         if details:
             return validation_error(details)
         return interaction_json(db.update_interaction(id, **values))
+
+    # --- Pieprasījumi (F4) ---
 
     @app.get("/requests")
     def list_requests(
@@ -503,7 +633,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         dueWithinDays: int | None = Query(None, ge=0, le=365),
         mine: bool = False,
         organizationId: int | None = None,
-        user_id: int = Depends(require_user),
+        user: User = Depends(require_staff),
     ):
         if organizationId is not None and not is_valid_id(organizationId):
             return []
@@ -515,50 +645,61 @@ def create_app(db_path: str | None = None) -> FastAPI:
             due_until=(on + timedelta(days=dueWithinDays)).isoformat()
             if dueWithinDays is not None
             else None,
-            responsible_user_id=user_id if mine else None,
+            responsible_user_id=own_scope(user, mine),
             organization_id=organizationId,
         )
         return [request_json(row, on) for row in rows]
 
     @app.post("/requests", status_code=201)
-    def create_request(data: RequestInput, user_id: int = Depends(require_user)):
-        values, details = check_request(data, db, creating=True)
+    def create_request(data: RequestInput, user: User = Depends(require_staff)):
+        values, details = check_request(
+            data, lambda org_id: visible_organization(user, org_id), creating=True
+        )
         if details:
             return validation_error(details)
         row = db.create_request(**values)
         return JSONResponse(status_code=201, content=request_json(row, today()))
 
     @app.get("/requests/{id}")
-    def get_request(id: int, user_id: int = Depends(require_user)):
-        row = db.get_request(id) if is_valid_id(id) else None
+    def get_request(id: int, user: User = Depends(require_staff)):
+        row = visible_request(user, id)
         return request_json(row, today()) if row else request_not_found()
 
     @app.put("/requests/{id}")
-    def update_request(id: int, data: RequestInput, user_id: int = Depends(require_user)):
-        if not is_valid_id(id) or db.get_request(id) is None:
+    def update_request(id: int, data: RequestInput, user: User = Depends(require_staff)):
+        if visible_request(user, id) is None:
             return request_not_found()
-        values, details = check_request(data, db, creating=False)
+        values, details = check_request(data, lambda org_id: None, creating=False)
         if details:
             return validation_error(details)
         return request_json(db.update_request(id, **values), today())
 
+    # --- Lapas ---
+
+    def page(request: Request, filename: str, roles: tuple[str, ...]):
+        user = session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        if user.role not in roles:
+            home = "/admin" if user.role == "ADMIN" else "/organizacijas"
+            return RedirectResponse(home, status_code=303)
+        return FileResponse(STATIC_DIR / filename)
+
     @app.get("/pieprasijumi", include_in_schema=False)
     def requests_page(request: Request):
-        if session_user_id(request) is None:
-            return RedirectResponse("/login", status_code=303)
-        return FileResponse(STATIC_DIR / "requests.html")
+        return page(request, "requests.html", STAFF_ROLES)
 
     @app.get("/organizacijas/{org_id:int}", include_in_schema=False)
     def organization_page(request: Request, org_id: int):
-        if session_user_id(request) is None:
-            return RedirectResponse("/login", status_code=303)
-        return FileResponse(STATIC_DIR / "organization.html")
+        return page(request, "organization.html", STAFF_ROLES)
 
     @app.get("/organizacijas", include_in_schema=False)
     def organizations_page(request: Request):
-        if session_user_id(request) is None:
-            return RedirectResponse("/login", status_code=303)
-        return FileResponse(STATIC_DIR / "organizations.html")
+        return page(request, "organizations.html", STAFF_ROLES)
+
+    @app.get("/admin", include_in_schema=False)
+    def admin_page(request: Request):
+        return page(request, "admin.html", ("ADMIN",))
 
     @app.get("/register", include_in_schema=False)
     def register_page():

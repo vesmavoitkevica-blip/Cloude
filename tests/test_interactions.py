@@ -157,11 +157,13 @@ def test_empty_history(client, org):
 
 
 # F3-9
-def test_latest_mine_with_limit(app, client, org):
+def test_latest_mine_with_limit(app, client, org, set_role):
     anna = logged_in(app, "anna@example.com")
+    annas_org = anna.post("/organizations", json={"name": "Annas"}).json()
     for day in range(1, 8):
         add(client, org["id"], occurredOn=f"2026-10-0{day}", summary=f"mans {day}")
-    add(anna, org["id"], occurredOn="2026-10-09", summary="Annas")
+    add(anna, annas_org["id"], occurredOn="2026-10-09", summary="Annas")
+    set_role(client.user_id, "MANAGER")  # vadītājs redz arī Annas ierakstus (N3)
     response = client.get("/interactions", params={"mine": "true", "limit": 5})
     assert response.status_code == 200
     assert summaries(response) == ["mans 7", "mans 6", "mans 5", "mans 4", "mans 3"]
@@ -207,9 +209,10 @@ def test_edit_validation_error_changes_nothing(client, org):
 
 
 # F3-11
-def test_other_user_cannot_edit(app, client, org):
+def test_other_user_cannot_edit(app, client, org, set_role):
     item = add(client, org["id"]).json()
     anna = logged_in(app, "anna@example.com")
+    set_role(anna.user_id, "MANAGER")  # redz ierakstu, bet nav autore
     response = anna.put(
         f"/interactions/{item['id']}",
         json={"occurredOn": "2026-10-01", "type": "CALL", "summary": "Pārrakstīts."},
@@ -255,7 +258,12 @@ def test_requires_session(app, method, path, body):
 
 
 def test_current_user(client):
-    assert client.get("/auth/me").json() == {"id": client.user_id, "email": "janis@example.com"}
+    assert client.get("/auth/me").json() == {
+        "id": client.user_id,
+        "email": "janis@example.com",
+        "name": None,
+        "role": "EMPLOYEE",
+    }
 
 
 # F3-14

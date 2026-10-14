@@ -7,6 +7,17 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<header class="site-header">
+  <nav aria-label="Galvenā navigācija">
+    <ul>
+      <li class="staff-only"><a href="/organizacijas">Organizācijas</a></li>
+      <li class="staff-only"><a href="/pieprasijumi">Pieprasījumi</a></li>
+      <li class="admin-only" hidden><a href="/admin">Administrēšana</a></li>
+    </ul>
+  </nav>
+  <p id="who"></p>
+  <button type="button" id="logout">Izrakstīties</button>
+</header>
 <main class="wide">
   <p><a href="/organizacijas">← Visas organizācijas</a></p>
   <h1 id="org-name">Organizācija</h1>
@@ -27,6 +38,7 @@
 
     <section aria-labelledby="form-heading">
       <h2 id="form-heading">Jauna mijiedarbība</h2>
+      <p id="not-responsible" hidden>Mijiedarbības reģistrē organizācijas atbildīgais darbinieks.</p>
       <p class="hint">Nerakstiet personas kodus, veselības vai citus sensitīvus datus.</p>
       <form id="form" novalidate>
         <input type="hidden" id="interaction-id">
@@ -66,6 +78,7 @@
 
   <p id="message" role="status"></p>
 </main>
+<script src="/static/nav.js"></script>
 <script src="/static/organization.js"></script>
 </body>
 </html>

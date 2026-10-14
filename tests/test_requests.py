@@ -154,11 +154,12 @@ def test_overdue_follows_today(monkeypatch, client, org):
 
 
 # F4-8
-def test_update_request(app, client, org):
+def test_update_request(app, client, org, set_role):
     item = add(client, org["id"]).json()
     other = client.post("/organizations", json={"name": "Cita"}).json()
     time.sleep(0.01)
     anna = logged_in(app, "anna@example.com")
+    set_role(anna.user_id, "MANAGER")  # vadītājs pārvalda visus pieprasījumus (N3)
     response = anna.put(
         f"/requests/{item['id']}",
         json={
@@ -209,8 +210,12 @@ def test_unknown_request(client, method, request_id):
 
 
 @pytest.fixture
-def sample(app, client, org):
-    """Pieprasījumi ar dažādiem statusiem un termiņiem; šodiena ir 2026-10-14."""
+def sample(app, client, org, set_role):
+    """Pieprasījumi ar dažādiem statusiem un termiņiem; šodiena ir 2026-10-14.
+
+    `client` ir vadītājs, lai redzētu arī Annas organizācijas pieprasījumus (N3).
+    """
+    set_role(client.user_id, "MANAGER")
     anna = logged_in(app, "anna@example.com")
     annas_org = anna.post("/organizations", json={"name": "Annas organizācija"}).json()
     add(client, org["id"], title="kavēts 5 d.", dueDate="2026-10-09", status="IN_PROGRESS")
