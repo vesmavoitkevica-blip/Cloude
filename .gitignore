@@ -1,0 +1,3 @@
+# CR-4: lokālā SQLite datu bāze
+*.db
+__pycache__/
