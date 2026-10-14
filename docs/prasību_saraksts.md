@@ -79,10 +79,10 @@ Palaišana: `uvicorn --factory app.main:create_app --reload`.
 | Slānis | Saturs |
 | --- | --- |
 | **Pārlūks** | HTML lapas ar JavaScript (`fetch`); formas un saraksti bez JavaScript nedarbojas. Darbojas ar tastatūru, ekrānlasītāju, 200 % mērogu un 320 px platumu |
-| **Saskarne** | Statiskas lapas `app/static/*.html` ar kopīgu `style.css` un katrai lapai savu `*.js`. Paziņojumi pēc darbībām `role="status"`, lauku kļūdas pie laukiem, redzams fokuss. *Kopīga navigācija, skip-link un orientieri `header`/`nav`/`footer` vēl nav (plānots ar F9)* |
+| **Saskarne** | Statiskas lapas `app/static/*.html` ar kopīgu `style.css` un katrai lapai savu `*.js`. Paziņojumi pēc darbībām `role="status"`, lauku kļūdas pie laukiem, redzams fokuss. Pieslēgtā lietotāja lapām kopīga galvene `<header>` ar navigāciju `<nav>`, lietotāju un lomu tekstā un pogu "Izrakstīties" (`nav.js`, N3). *Skip-link un `<footer>` vēl nav (plānots ar F9)* |
 | **API** | `app/main.py` maršruti pēc `docs/openapi.yaml`. Validācija atgriež vienotu `Error` shēmu ar lauku kļūdām; sesijas pārbaude pirms datu pārbaudes (bez sesijas vienmēr 401). Pieprasījumu kavējums tiek aprēķināts (ne glabāts) pēc šodienas Europe/Riga. Forma tiek nosūtīta ar `fetch`, lapa netiek pārlādēta (PRG netiek izmantots) |
 | **Lapu maršruti** | `app/main.py` atdod HTML lapas; nepieslēgtu lietotāju novirza uz `/login` |
-| **Drošība** | Paroles – `scrypt` jaucējvērtība (`app/security.py`); sesijas sīkdatne `session` (`HttpOnly`, `SameSite=Lax`), datu bāzē tikai marķiera jaucējvērtība |
+| **Drošība** | Paroles – `scrypt` jaucējvērtība (`app/security.py`); sesijas sīkdatne `session` (`HttpOnly`, `SameSite=Lax`), datu bāzē tikai marķiera jaucējvērtība. Loma katrā pieprasījumā tiek nolasīta no lietotāja konta caur sesiju; tiesības pārbauda serveris (N3). Pirmais administrators: `python -m app.cli set-role <e-pasts> ADMIN` |
 | **Dati** | SQLite (`app/db.py`); fails no vides mainīgā `AUTH_DB_PATH`, noklusējums `auth.db` |
 | **MI komponents** | *Plānots:* `app/ai.py` – MI-1, MI-2, MI-3 |
 | **MI pakalpojums** | *Plānots:* GPAI API (Claude) vai atslēgvārdu imitācija ar vienādu funkcijas līgumu |
@@ -102,13 +102,13 @@ Palaišana: `uvicorn --factory app.main:create_app --reload`.
 | Darbs | Pieprasījumi, statusi | `/pieprasijumi` | F4 | Darbinieks, vadītājs | Ir |
 | Darbs | Mani uzdevumi | — | F5 | Darbinieks, vadītājs | Plānots |
 | Vadība | Pārskats: tabula, diagramma | — | F7 | Vadītājs | Plānots |
-| Administrēšana | Lomas, dzēšana, piekļuves žurnāls | — | N2, N3 | Administrators | Plānots |
+| Administrēšana | Lomas, dzēšana, piekļuves žurnāls | `/admin` | N2, N3 | Administrators | Lomas ir (N3); dzēšana un piekļuves žurnāls plānoti (N2) |
 
 ### Datu modelis (SQLite)
 
 | Tabula | Galvenie lauki | Stāvoklis |
 | --- | --- | --- |
-| `users` | e-pasts, paroles jaucējvērtība | Ir (F0); *plānots: vārds, loma (N3)* |
+| `users` | e-pasts, paroles jaucējvērtība, vārds, loma | Ir (F0, N3) |
 | `sessions` | marķiera jaucējvērtība, lietotājs | Ir (F0) |
 | `organizations` | nosaukums, reģ. nr., adrese, atbildīgais darbinieks | Ir (F1); *plānots: veids* |
 | `interactions` | organizācija, autors, veids, datums, kopsavilkums, nākamais solis | Ir (F3); *plānots: dalībnieki, MI marķējums* |

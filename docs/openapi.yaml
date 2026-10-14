@@ -23,7 +23,7 @@ tags:
   - name: Sistēma
     description: Tehniskie galapunkti (R4)
   - name: Lietotāji
-    description: Lietotāju reģistrācija un pieteikšanās (CR-4)
+    description: Lietotāju reģistrācija, pieteikšanās (CR-4) un lomas (N3)
   - name: Organizācijas
     description: Organizāciju izveide, rediģēšana un meklēšana (F1)
   - name: Mijiedarbības
@@ -119,15 +119,17 @@ paths:
         Izveido lietotāja kontu (CR-4). `email` tiek saglabāts bez atstarpēm
         sākumā un beigās un mazajiem burtiem. Parole tiek glabāta tikai kā
         jaucējvērtība. Ne e-pasts, ne parole netiek rakstīti žurnālā.
+        Jauna lietotāja loma vienmēr ir `EMPLOYEE` (N3).
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Credentials'
+              $ref: '#/components/schemas/Registration'
             example:
               email: janis@example.com
               password: drosa-parole-1
+              name: Jānis Bērziņš
       responses:
         '201':
           description: Konts izveidots
@@ -226,6 +228,108 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /auth/logout:
+    post:
+      tags: [Lietotāji]
+      operationId: logoutUser
+      summary: Izrakstīties
+      description: |
+        Izdzēš sesiju datu bāzē un sīkdatni `session` (N3). Atbilde 204 arī
+        tad, ja sesijas nebija.
+      responses:
+        '204':
+          description: Izrakstīšanās izdevusies
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users:
+    get:
+      tags: [Lietotāji]
+      operationId: listUsers
+      summary: Lietotāju saraksts
+      description: |
+        Visi lietotāji, sakārtoti pēc e-pasta (N3). Pieejams vadītājam
+        (atbildīgā darbinieka izvēlei) un administratoram.
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Lietotāji
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users/{id}/role:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Lietotāja ID
+        schema:
+          type: integer
+          example: 2
+    put:
+      tags: [Lietotāji]
+      operationId: changeUserRole
+      summary: Mainīt lietotāja lomu
+      description: |
+        Tikai administratoram (N3). Jaunā loma stājas spēkā lietotāja
+        nākamajā pieprasījumā. Vienīgajam administratoram lomu noņemt nevar.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleChange'
+            example:
+              role: MANAGER
+      responses:
+        '200':
+          description: Loma mainīta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+        '409':
+          description: Vienīgajam administratoram nevar noņemt lomu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: LAST_ADMIN
+                  message: At least one administrator is required
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /organizations:
     get:
       tags: [Organizācijas]
@@ -266,6 +370,8 @@ paths:
           $ref: '#/components/responses/ValidationErrorGeneric'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/RouteNotFound'
         '500':
@@ -276,7 +382,8 @@ paths:
       summary: Izveidot organizāciju
       description: |
         Izveido organizāciju (F1). Ja `responsibleUserId` nav norādīts,
-        atbildīgais ir pieslēgtais lietotājs. Vajadzīga sesija.
+        atbildīgais ir pieslēgtais lietotājs. Citu atbildīgo var norādīt tikai
+        vadītājs; darbiniekam 403 (N3). Vajadzīga sesija.
       security:
         - sessionCookie: []
       requestBody:
@@ -300,6 +407,8 @@ paths:
           $ref: '#/components/responses/OrganizationValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/RouteNotFound'
         '409':
@@ -333,6 +442,8 @@ paths:
           $ref: '#/components/responses/ValidationErrorGeneric'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
@@ -344,7 +455,8 @@ paths:
       description: |
         Aizstāj visus rediģējamos laukus (F1). Neobligātais lauks, kas nav
         norādīts, tiek notīrīts; izņēmums ir `responsibleUserId`, kas tādā
-        gadījumā paliek nemainīts. Vajadzīga sesija.
+        gadījumā paliek nemainīts. Mainīt atbildīgo drīkst tikai vadītājs;
+        darbiniekam 403 (N3). Vajadzīga sesija.
       security:
         - sessionCookie: []
       requestBody:
@@ -369,6 +481,8 @@ paths:
           $ref: '#/components/responses/OrganizationValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '409':
@@ -407,6 +521,8 @@ paths:
           $ref: '#/components/responses/ValidationErrorGeneric'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
@@ -417,7 +533,8 @@ paths:
       summary: Pievienot mijiedarbību
       description: |
         Pievieno mijiedarbību organizācijai (F3). Autors ir pieslēgtais
-        lietotājs. Vajadzīga sesija.
+        lietotājs. Reģistrēt drīkst tikai organizācijas atbildīgais (N3).
+        Vajadzīga sesija.
       security:
         - sessionCookie: []
       requestBody:
@@ -442,6 +559,8 @@ paths:
           $ref: '#/components/responses/InteractionValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
@@ -487,6 +606,8 @@ paths:
           $ref: '#/components/responses/ValidationErrorGeneric'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/RouteNotFound'
         '500':
@@ -518,6 +639,8 @@ paths:
           $ref: '#/components/responses/ValidationErrorGeneric'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/InteractionNotFound'
         '500':
@@ -527,8 +650,8 @@ paths:
       operationId: updateInteraction
       summary: Labot mijiedarbību
       description: |
-        Aizstāj visus laukus (F3). Labot drīkst tikai ieraksta autors.
-        Organizācija un autors nemainās. Vajadzīga sesija.
+        Aizstāj visus laukus (F3). Labot drīkst tikai ieraksta autors, kas
+        redz organizāciju (N3). Organizācija un autors nemainās. Vajadzīga sesija.
       security:
         - sessionCookie: []
       requestBody:
@@ -554,7 +677,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/NotAuthor'
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/InteractionNotFound'
         '500':
@@ -622,6 +745,8 @@ paths:
           $ref: '#/components/responses/ValidationErrorGeneric'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/RouteNotFound'
         '500':
@@ -657,6 +782,8 @@ paths:
           $ref: '#/components/responses/RequestValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/RouteNotFound'
         '500':
@@ -688,6 +815,8 @@ paths:
           $ref: '#/components/responses/ValidationErrorGeneric'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/RequestNotFound'
         '500':
@@ -723,6 +852,8 @@ paths:
           $ref: '#/components/responses/RequestValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/RequestNotFound'
         '500':
@@ -867,10 +998,38 @@ components:
           writeOnly: true
           example: drosa-parole-1
 
+    Registration:
+      description: |
+        Reģistrācijas dati (CR-4, N3). Papildus `Credentials` kļūdām: `name` /
+        `INVALID_FORMAT`, `TOO_LONG` (> 100 rakstzīmes).
+      allOf:
+        - $ref: '#/components/schemas/Credentials'
+        - type: object
+          properties:
+            name:
+              type: string
+              nullable: true
+              maxLength: 100
+              description: Vārds un uzvārds; tukša virkne = `null`
+              example: Jānis Bērziņš
+
+    Role:
+      type: string
+      description: '`EMPLOYEE` Darbinieks · `MANAGER` Vadītājs · `ADMIN` Administrators'
+      enum: [EMPLOYEE, MANAGER, ADMIN]
+      example: EMPLOYEE
+
+    RoleChange:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: '#/components/schemas/Role'
+
     User:
       type: object
       description: Lietotāja konts. Parole atbildē nekad netiek iekļauta.
-      required: [id, email]
+      required: [id, email, name, role]
       properties:
         id:
           type: integer
@@ -879,6 +1038,12 @@ components:
           type: string
           format: email
           example: janis@example.com
+        name:
+          type: string
+          nullable: true
+          example: Jānis Bērziņš
+        role:
+          $ref: '#/components/schemas/Role'
 
     OrganizationInput:
       type: object
@@ -1248,8 +1413,10 @@ components:
             error:
               code: NOT_FOUND
               message: Interaction not found
-    NotAuthor:
-      description: Labot drīkst tikai ieraksta autors
+    Forbidden:
+      description: |
+        Darbība lietotāja lomai nav atļauta (N3), piemēram, administrators
+        darba datos, darbinieks maina atbildīgo, svešs mijiedarbības ieraksts.
       content:
         application/json:
           schema:
@@ -1257,7 +1424,17 @@ components:
           example:
             error:
               code: FORBIDDEN
-              message: Only the author can edit this interaction
+              message: Not allowed for this role
+    UserNotFound:
+      description: Lietotājs ar šādu ID nav atrasts
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: NOT_FOUND
+              message: User not found
     RequestValidationError:
       description: Kļūdaini pieprasījuma dati. Izmaiņas netiek saglabātas.
       content:
