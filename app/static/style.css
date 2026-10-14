@@ -21,3 +21,15 @@ table { width: 100%; border-collapse: collapse; }
 caption { text-align: left; font-weight: 600; padding-bottom: 8px; }
 th, td { text-align: left; padding: 8px; border-bottom: 1px solid #d0d4da; }
 :focus-visible { outline: 3px solid #1a56db; outline-offset: 2px; }
+
+/* F3: organizācijas kartīte un mijiedarbību žurnāls */
+select, textarea { width: 100%; box-sizing: border-box; padding: 8px; margin-top: 4px; font: inherit; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; }
+.facts dt { font-weight: 600; }
+.facts dd { margin: 0; }
+.hint { color: #4a5568; font-size: .9em; }
+.history { list-style: none; padding: 0; }
+.history li { border-bottom: 1px solid #d0d4da; padding: 12px 0; }
+.history h3 { margin: 0 0 6px; font-size: 1em; }
+.history p { margin: 4px 0; white-space: pre-line; }
+.history button { width: auto; margin-top: 6px; padding: 6px 10px; }

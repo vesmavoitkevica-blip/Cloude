@@ -1,4 +1,4 @@
-"""Lietotāju reģistrācija un pieteikšanās (CR-4) un organizācijas (F1).
+"""Lietotāju reģistrācija un pieteikšanās (CR-4), organizācijas (F1) un mijiedarbības (F3).
 
 Palaišana: `uvicorn --factory app.main:create_app --reload`, tad atver `/register`, `/login`
 vai `/organizacijas`.
@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -37,6 +39,20 @@ MAX_NAME_LENGTH = 200
 MAX_ADDRESS_LENGTH = 300
 # Lielāku veselu skaitli SQLite nevar saglabāt; šāda ID noteikti nav.
 MAX_ID = 2**63 - 1
+DATE_PATTERN = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+INTERACTION_TYPES = ("CALL", "EMAIL", "MEETING")
+MAX_SUMMARY_LENGTH = 2000
+MAX_NEXT_STEP_LENGTH = 500
+LOCAL_TIMEZONE = ZoneInfo("Europe/Riga")
+
+
+def today() -> date:
+    """Šodiena pēc Latvijas laika (F9 datu noteikumi)."""
+    return datetime.now(LOCAL_TIMEZONE).date()
+
+
+def is_valid_id(value: int) -> bool:
+    return 0 < value <= MAX_ID
 
 
 class Credentials(BaseModel):
@@ -50,6 +66,13 @@ class OrganizationInput(BaseModel):
     regNumber: Any = None
     address: Any = None
     responsibleUserId: Any = None
+
+
+class InteractionInput(BaseModel):
+    occurredOn: Any = None
+    type: Any = None
+    summary: Any = None
+    nextStep: Any = None
 
 
 def error(status: int, code: str, message: str, details: list[dict] | None = None):
@@ -125,7 +148,7 @@ def check_organization(
     if responsible is not None:
         if not isinstance(responsible, int) or isinstance(responsible, bool):
             details.append({"field": "responsibleUserId", "issue": "INVALID_FORMAT"})
-        elif not 0 < responsible <= MAX_ID or not db.user_exists(responsible):
+        elif not is_valid_id(responsible) or not db.user_exists(responsible):
             details.append({"field": "responsibleUserId", "issue": "NOT_FOUND"})
 
     values = {
@@ -135,6 +158,71 @@ def check_organization(
         "responsible_user_id": responsible,
     }
     return values, details
+
+
+def check_interaction(data: InteractionInput) -> tuple[dict[str, Any], list[dict]]:
+    details: list[dict] = []
+
+    occurred_on = data.occurredOn
+    if occurred_on is None or occurred_on == "":
+        details.append({"field": "occurredOn", "issue": "REQUIRED"})
+    else:
+        try:
+            if not isinstance(occurred_on, str) or not DATE_PATTERN.match(occurred_on):
+                raise ValueError
+            if date.fromisoformat(occurred_on) > today():
+                details.append({"field": "occurredOn", "issue": "IN_FUTURE"})
+        except ValueError:
+            details.append({"field": "occurredOn", "issue": "INVALID_FORMAT"})
+
+    kind = data.type
+    if kind is None or kind == "":
+        details.append({"field": "type", "issue": "REQUIRED"})
+    elif kind not in INTERACTION_TYPES:
+        details.append({"field": "type", "issue": "INVALID_FORMAT"})
+
+    summary = data.summary
+    if summary is None or (isinstance(summary, str) and not summary.strip()):
+        details.append({"field": "summary", "issue": "REQUIRED"})
+    elif not isinstance(summary, str):
+        details.append({"field": "summary", "issue": "INVALID_FORMAT"})
+    elif len(summary.strip()) > MAX_SUMMARY_LENGTH:
+        details.append({"field": "summary", "issue": "TOO_LONG"})
+
+    next_step = data.nextStep
+    if next_step is not None and not isinstance(next_step, str):
+        details.append({"field": "nextStep", "issue": "INVALID_FORMAT"})
+    else:
+        next_step = optional_text(next_step)
+        if next_step is not None and len(next_step) > MAX_NEXT_STEP_LENGTH:
+            details.append({"field": "nextStep", "issue": "TOO_LONG"})
+
+    values = {
+        "occurred_on": occurred_on,
+        "type": kind,
+        "summary": summary.strip() if isinstance(summary, str) else summary,
+        "next_step": next_step,
+    }
+    return values, details
+
+
+def interaction_json(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "organizationId": row["organization_id"],
+        "organizationName": row["organization_name"],
+        "authorId": row["author_id"],
+        "occurredOn": row["occurred_on"],
+        "type": row["type"],
+        "summary": row["summary"],
+        "nextStep": row["next_step"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def interaction_not_found() -> JSONResponse:
+    return error(404, "NOT_FOUND", "Interaction not found")
 
 
 def organization_json(row) -> dict[str, Any]:
@@ -248,13 +336,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/organizations/{id}")
     def get_organization(id: int, user_id: int = Depends(require_user)):
-        row = db.get_organization(id) if 0 < id <= MAX_ID else None
+        row = db.get_organization(id) if is_valid_id(id) else None
         return organization_json(row) if row else organization_not_found()
 
     @app.put("/organizations/{id}")
     def update_organization(id: int, data: OrganizationInput, user_id: int = Depends(require_user)):
         # Neesošai organizācijai 404 pirms datu pārbaudes: nav ko pārbaudīt, ja ieraksta nav.
-        if not 0 < id <= MAX_ID or db.get_organization(id) is None:
+        if not is_valid_id(id) or db.get_organization(id) is None:
             return organization_not_found()
         values, details = check_organization(data, db)
         if details:
@@ -264,6 +352,59 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except DuplicateRegNumber:
             return reg_number_conflict()
         return organization_json(row) if row else organization_not_found()
+
+    @app.get("/auth/me")
+    def current_user(user_id: int = Depends(require_user)):
+        user = db.get_user(user_id)
+        return {"id": user["id"], "email": user["email"]}
+
+    @app.get("/organizations/{id}/interactions")
+    def list_organization_interactions(id: int, user_id: int = Depends(require_user)):
+        if not is_valid_id(id) or db.get_organization(id) is None:
+            return organization_not_found()
+        return [interaction_json(row) for row in db.organization_interactions(id)]
+
+    @app.post("/organizations/{id}/interactions", status_code=201)
+    def create_interaction(id: int, data: InteractionInput, user_id: int = Depends(require_user)):
+        if not is_valid_id(id) or db.get_organization(id) is None:
+            return organization_not_found()
+        values, details = check_interaction(data)
+        if details:
+            return validation_error(details)
+        row = db.create_interaction(organization_id=id, author_id=user_id, **values)
+        return JSONResponse(status_code=201, content=interaction_json(row))
+
+    @app.get("/interactions")
+    def list_interactions(
+        mine: bool = False,
+        limit: int = Query(50, ge=1, le=100),
+        user_id: int = Depends(require_user),
+    ):
+        rows = db.latest_interactions(user_id if mine else None, limit)
+        return [interaction_json(row) for row in rows]
+
+    @app.get("/interactions/{id}")
+    def get_interaction(id: int, user_id: int = Depends(require_user)):
+        row = db.get_interaction(id) if is_valid_id(id) else None
+        return interaction_json(row) if row else interaction_not_found()
+
+    @app.put("/interactions/{id}")
+    def update_interaction(id: int, data: InteractionInput, user_id: int = Depends(require_user)):
+        existing = db.get_interaction(id) if is_valid_id(id) else None
+        if existing is None:
+            return interaction_not_found()
+        if existing["author_id"] != user_id:
+            return error(403, "FORBIDDEN", "Only the author can edit this interaction")
+        values, details = check_interaction(data)
+        if details:
+            return validation_error(details)
+        return interaction_json(db.update_interaction(id, **values))
+
+    @app.get("/organizacijas/{org_id:int}", include_in_schema=False)
+    def organization_page(request: Request, org_id: int):
+        if session_user_id(request) is None:
+            return RedirectResponse("/login", status_code=303)
+        return FileResponse(STATIC_DIR / "organization.html")
 
     @app.get("/organizacijas", include_in_schema=False)
     def organizations_page(request: Request):

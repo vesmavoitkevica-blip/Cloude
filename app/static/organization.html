@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="lv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Organizācija</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="wide">
+  <p><a href="/organizacijas">← Visas organizācijas</a></p>
+  <h1 id="org-name">Organizācija</h1>
+  <p id="not-found" hidden>Organizācija nav atrasta. <a href="/organizacijas">Atpakaļ uz sarakstu</a></p>
+
+  <div id="card" hidden>
+    <dl class="facts">
+      <dt>Reģistrācijas numurs</dt><dd id="org-reg">—</dd>
+      <dt>Adrese</dt><dd id="org-address">—</dd>
+    </dl>
+
+    <section aria-labelledby="form-heading">
+      <h2 id="form-heading">Jauna mijiedarbība</h2>
+      <p class="hint">Nerakstiet personas kodus, veselības vai citus sensitīvus datus.</p>
+      <form id="form" novalidate>
+        <input type="hidden" id="interaction-id">
+
+        <label for="occurredOn">Datums (obligāts)</label>
+        <input id="occurredOn" type="date" required aria-describedby="occurredOn-error">
+        <div class="field-error" id="occurredOn-error"></div>
+
+        <label for="type">Veids (obligāts)</label>
+        <select id="type" required aria-describedby="type-error">
+          <option value="">— izvēlieties —</option>
+          <option value="CALL">Zvans</option>
+          <option value="EMAIL">E-pasts</option>
+          <option value="MEETING">Sanāksme</option>
+        </select>
+        <div class="field-error" id="type-error"></div>
+
+        <label for="summary">Kopsavilkums (obligāts)</label>
+        <textarea id="summary" rows="4" maxlength="2000" required aria-describedby="summary-error"></textarea>
+        <div class="field-error" id="summary-error"></div>
+
+        <label for="nextStep">Nākamais solis</label>
+        <textarea id="nextStep" rows="2" maxlength="500" aria-describedby="nextStep-error"></textarea>
+        <div class="field-error" id="nextStep-error"></div>
+
+        <button type="submit">Saglabāt</button>
+        <button type="button" id="cancel" hidden>Atcelt labošanu</button>
+      </form>
+    </section>
+
+    <section aria-labelledby="history-heading">
+      <h2 id="history-heading">Mijiedarbību vēsture</h2>
+      <ol id="history" class="history"></ol>
+      <p id="empty" hidden>Ar šo organizāciju vēl nav reģistrētas mijiedarbības.</p>
+    </section>
+  </div>
+
+  <p id="message" role="status"></p>
+</main>
+<script src="/static/organization.js"></script>
+</body>
+</html>
