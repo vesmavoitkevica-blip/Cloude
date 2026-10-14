@@ -24,6 +24,8 @@ tags:
     description: Tehniskie galapunkti (R4)
   - name: Lietotāji
     description: Lietotāju reģistrācija un pieteikšanās (CR-4)
+  - name: Organizācijas
+    description: Organizāciju izveide, rediģēšana un meklēšana (F1)
 
 paths:
   /health:
@@ -196,7 +198,164 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /organizations:
+    get:
+      tags: [Organizācijas]
+      operationId: listOrganizations
+      summary: Meklēt organizācijas
+      description: |
+        Atgriež organizācijas, sakārtotas pēc nosaukuma latviešu alfabēta
+        secībā (F1). `q` meklē daļēju sakritību nosaukumā un reģistrācijas
+        numurā; lielie un mazie burti netiek šķirti, garumzīmes tiek ņemtas
+        vērā. Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Meklējamais teksts
+          schema:
+            type: string
+            example: rīga
+        - name: mine
+          in: query
+          required: false
+          description: '`true` – tikai organizācijas, kurām pieslēgtais lietotājs ir atbildīgais'
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Atrastās organizācijas (var būt tukšs saraksts)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Organizācijas]
+      operationId: createOrganization
+      summary: Izveidot organizāciju
+      description: |
+        Izveido organizāciju (F1). Ja `responsibleUserId` nav norādīts,
+        atbildīgais ir pieslēgtais lietotājs. Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationInput'
+            example:
+              name: SIA Ezermalas Ūdens
+              regNumber: '40003000001'
+              address: Ezera iela 1, Ezermala
+      responses:
+        '201':
+          description: Organizācija izveidota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/OrganizationValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '409':
+          $ref: '#/components/responses/RegNumberConflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /organizations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Organizācijas ID
+        schema:
+          type: integer
+          example: 1
+    get:
+      tags: [Organizācijas]
+      operationId: getOrganization
+      summary: Organizācija pēc ID
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Organizācija atrasta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Organizācijas]
+      operationId: updateOrganization
+      summary: Rediģēt organizāciju
+      description: |
+        Aizstāj visus rediģējamos laukus (F1). Neobligātais lauks, kas nav
+        norādīts, tiek notīrīts; izņēmums ir `responsibleUserId`, kas tādā
+        gadījumā paliek nemainīts. Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationInput'
+            example:
+              name: SIA Ezermalas Ūdens
+              regNumber: '40003000001'
+              address: Krasta iela 5, Ezermala
+              responsibleUserId: 1
+      responses:
+        '200':
+          description: Organizācija atjaunota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/OrganizationValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/RegNumberConflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Sesijas sīkdatne, ko iestata `POST /auth/login` (CR-4)
+
   schemas:
     Health:
       type: object
@@ -341,6 +500,68 @@ components:
           format: email
           example: janis@example.com
 
+    OrganizationInput:
+      type: object
+      description: |
+        Organizācijas dati izveidei un rediģēšanai (F1). Lauka kļūdas:
+        `REQUIRED`, `INVALID_FORMAT`, `TOO_LONG`, `NOT_FOUND` (nav tāda
+        lietotāja), `ALREADY_EXISTS` (ar 409). Tukša virkne neobligātajā laukā
+        tiek saglabāta kā `null`.
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Nosaukums; atstarpes sākumā un beigās tiek noņemtas
+          example: SIA Ezermalas Ūdens
+        regNumber:
+          type: string
+          nullable: true
+          pattern: '^[0-9]{11}$'
+          description: Reģistrācijas numurs, 11 cipari, unikāls
+          example: '40003000001'
+        address:
+          type: string
+          nullable: true
+          maxLength: 300
+          example: Ezera iela 1, Ezermala
+        responsibleUserId:
+          type: integer
+          nullable: true
+          description: Atbildīgā darbinieka lietotāja ID
+          example: 1
+
+    Organization:
+      type: object
+      required: [id, name, regNumber, address, responsibleUserId, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: SIA Ezermalas Ūdens
+        regNumber:
+          type: string
+          nullable: true
+          example: '40003000001'
+        address:
+          type: string
+          nullable: true
+          example: Ezera iela 1, Ezermala
+        responsibleUserId:
+          type: integer
+          example: 1
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-14T09:15:00Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-14T09:15:00Z'
+
     Error:
       type: object
       description: Vienota kļūdu shēma visiem galapunktiem
@@ -373,6 +594,65 @@ components:
                     example: INVALID_FORMAT
 
   responses:
+    Unauthorized:
+      description: Nav derīgas sesijas. Lietotājam jāpiesakās.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: Authentication required
+    ValidationErrorGeneric:
+      description: Kļūdains pieprasījuma parametrs
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details:
+                - field: id
+                  issue: INVALID_FORMAT
+    OrganizationValidationError:
+      description: Kļūdaini organizācijas dati. Izmaiņas netiek saglabātas.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details:
+                - field: name
+                  issue: REQUIRED
+    OrganizationNotFound:
+      description: Organizācija ar šādu ID nav atrasta
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Organization not found
+    RegNumberConflict:
+      description: Reģistrācijas numurs jau pieder citai organizācijai
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: ALREADY_EXISTS
+              message: Organization already exists
+              details:
+                - field: regNumber
+                  issue: ALREADY_EXISTS
     ValidationError:
       description: Kļūdains pieprasījums. Iesniegums netiek saglabāts.
       content:
