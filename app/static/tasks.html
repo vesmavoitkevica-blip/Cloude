@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="lv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Uzdevumi</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav aria-label="Galvenā navigācija">
+    <ul>
+      <li class="staff-only"><a href="/organizacijas">Organizācijas</a></li>
+      <li class="staff-only"><a href="/pieprasijumi">Pieprasījumi</a></li>
+      <li class="staff-only"><a href="/uzdevumi">Uzdevumi</a></li>
+      <li class="admin-only" hidden><a href="/admin">Administrēšana</a></li>
+    </ul>
+  </nav>
+  <p id="who"></p>
+  <button type="button" id="logout">Izrakstīties</button>
+</header>
+<main class="wide">
+  <h1>Uzdevumi</h1>
+
+  <section id="reminders-section" aria-labelledby="reminders-heading" hidden>
+    <h2 id="reminders-heading">Atgādinājumi</h2>
+    <ul id="reminders"></ul>
+  </section>
+
+  <section aria-labelledby="filter-heading">
+    <h2 id="filter-heading">Filtri</h2>
+    <form id="filters">
+      <label class="inline"><input type="checkbox" name="showDone" value="true"> Rādīt izpildītos</label>
+      <label class="inline team-only" hidden><input type="checkbox" name="team" value="true"> Komandas uzdevumi</label>
+      <button type="submit">Rādīt</button>
+    </form>
+  </section>
+
+  <section aria-labelledby="list-heading">
+    <h2 id="list-heading">Saraksts</h2>
+    <div class="table-scroll">
+      <table>
+        <caption>Uzdevumi pēc termiņa</caption>
+        <thead>
+          <tr>
+            <th scope="col">Uzdevums</th>
+            <th scope="col">Saistīts ar</th>
+            <th scope="col">Termiņš</th>
+            <th scope="col">Statuss</th>
+            <th scope="col">Darbības</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p id="empty" hidden>Nav uzdevumu.</p>
+  </section>
+
+  <section aria-labelledby="form-heading">
+    <h2 id="form-heading">Jauns uzdevums</h2>
+    <form id="form" novalidate>
+      <input type="hidden" id="task-id">
+      <input type="hidden" id="requestId">
+      <input type="hidden" id="interactionId">
+      <p id="link-note" hidden></p>
+
+      <label for="title">Uzdevums (obligāts)</label>
+      <input id="title" maxlength="200" required aria-describedby="title-error">
+      <div class="field-error" id="title-error"></div>
+
+      <label for="dueDate">Termiņš (obligāts)</label>
+      <input id="dueDate" type="date" required aria-describedby="dueDate-error">
+      <div class="field-error" id="dueDate-error"></div>
+
+      <label for="remindOn">Atgādināt (ne vēlāk par termiņu)</label>
+      <input id="remindOn" type="date" aria-describedby="remindOn-error">
+      <div class="field-error" id="remindOn-error"></div>
+
+      <label for="organizationId">Organizācija</label>
+      <select id="organizationId" aria-describedby="organizationId-error">
+        <option value="">— nav —</option>
+      </select>
+      <div class="field-error" id="organizationId-error"></div>
+
+      <div id="done-field" hidden>
+        <label class="inline"><input type="checkbox" id="done"> Izpildīts</label>
+      </div>
+
+      <button type="submit">Saglabāt</button>
+      <button type="button" id="cancel" hidden>Atcelt labošanu</button>
+    </form>
+  </section>
+
+  <p id="message" role="status"></p>
+</main>
+<script src="/static/nav.js"></script>
+<script src="/static/tasks.js"></script>
+</body>
+</html>

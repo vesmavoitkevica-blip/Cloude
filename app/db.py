@@ -1,5 +1,5 @@
-"""SQLite glabātuve: lietotāji un sesijas (CR-4, N3), organizācijas (F1), mijiedarbības (F3)
-un pieprasījumi (F4)."""
+"""SQLite glabātuve: lietotāji un sesijas (CR-4, N3), organizācijas (F1), mijiedarbības (F3),
+pieprasījumi (F4) un uzdevumi (F5)."""
 
 from __future__ import annotations
 
@@ -54,6 +54,21 @@ CREATE TABLE IF NOT EXISTS requests (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS requests_by_due_date ON requests (due_date, id);
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id INTEGER NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    due_date TEXT NOT NULL,
+    remind_on TEXT,
+    done INTEGER NOT NULL DEFAULT 0,
+    completed_at TEXT,
+    organization_id INTEGER REFERENCES organizations(id),
+    request_id INTEGER REFERENCES requests(id),
+    interaction_id INTEGER REFERENCES interactions(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tasks_by_owner ON tasks (owner_id, done, due_date);
 """
 
 # Kolonnas, kas pievienotas pēc tabulas izveides; vecām datu bāzēm tās pievieno ar ALTER TABLE.
@@ -88,6 +103,15 @@ FROM requests r JOIN organizations o ON o.id = r.organization_id
 """
 # Kavēts = nav atbildēts un termiņš pirms šodienas (F9 datu noteikumi).
 REQUEST_OPEN = "r.status != 'ANSWERED'"
+
+TASK_SELECT = """
+SELECT t.id, t.owner_id, t.title, t.due_date, t.remind_on, t.done, t.completed_at,
+       t.organization_id, o.name AS organization_name, t.request_id, r.title AS request_title,
+       t.interaction_id, t.created_at, t.updated_at
+FROM tasks t
+LEFT JOIN organizations o ON o.id = t.organization_id
+LEFT JOIN requests r ON r.id = t.request_id
+"""
 
 # Milisekundes, lai `updatedAt` mainītos arī pēc ātras secīgas rediģēšanas.
 NOW = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
@@ -392,3 +416,91 @@ class Database:
     @staticmethod
     def _get_request(conn: sqlite3.Connection, request_id: int) -> sqlite3.Row | None:
         return conn.execute(REQUEST_SELECT + " WHERE r.id = ?", (request_id,)).fetchone()
+
+    def create_task(
+        self,
+        owner_id: int,
+        title: str,
+        due_date: str,
+        remind_on: str | None,
+        done: bool,
+        organization_id: int | None,
+        request_id: int | None,
+        interaction_id: int | None,
+    ) -> sqlite3.Row:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO tasks (owner_id, title, due_date, remind_on, done, completed_at,"
+                " organization_id, request_id, interaction_id, created_at, updated_at)"
+                f" VALUES (?, ?, ?, ?, ?, CASE WHEN ? THEN {NOW} END, ?, ?, ?, {NOW}, {NOW})",
+                (owner_id, title, due_date, remind_on, done, done,
+                 organization_id, request_id, interaction_id),
+            )
+            return self._get_task(conn, cursor.lastrowid)
+
+    def update_task(
+        self, task_id: int, title: str, due_date: str, remind_on: str | None, done: bool
+    ) -> sqlite3.Row | None:
+        """`completed_at` tiek iestatīts, kad uzdevums kļūst izpildīts, un notīrīts, atverot to."""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE tasks SET title = ?, due_date = ?, remind_on = ?,"
+                f" completed_at = CASE WHEN NOT ? THEN NULL WHEN done THEN completed_at ELSE {NOW} END,"
+                f" done = ?, updated_at = {NOW} WHERE id = ?",
+                (title, due_date, remind_on, done, done, task_id),
+            )
+            return self._get_task(conn, task_id)
+
+    def complete_task(self, task_id: int) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            conn.execute(
+                f"UPDATE tasks SET done = 1, completed_at = {NOW}, updated_at = {NOW}"
+                " WHERE id = ? AND NOT done",
+                (task_id,),
+            )
+            return self._get_task(conn, task_id)
+
+    def get_task(self, task_id: int) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return self._get_task(conn, task_id)
+
+    def search_tasks(
+        self,
+        today: str,
+        owner_id: int | None = None,
+        done: bool | None = None,
+        due_until: str | None = None,
+        reminders_due: bool | None = None,
+        organization_id: int | None = None,
+        interaction_id: int | None = None,
+    ) -> list[sqlite3.Row]:
+        conditions: list[str] = []
+        params: list = []
+        if owner_id is not None:
+            conditions.append("t.owner_id = ?")
+            params.append(owner_id)
+        if done is not None:
+            conditions.append("t.done = ?")
+            params.append(int(done))
+        if due_until is not None:
+            conditions.append("t.due_date <= ?")
+            params.append(due_until)
+        if reminders_due is not None:
+            due = "NOT t.done AND t.remind_on IS NOT NULL AND t.remind_on <= ?"
+            conditions.append(due if reminders_due else f"NOT ({due})")
+            params.append(today)
+        if organization_id is not None:
+            conditions.append("t.organization_id = ?")
+            params.append(organization_id)
+        if interaction_id is not None:
+            conditions.append("t.interaction_id = ?")
+            params.append(interaction_id)
+        sql = TASK_SELECT
+        if conditions:
+            sql += " WHERE " + " AND ".join(f"({c})" for c in conditions)
+        with self.connect() as conn:
+            return conn.execute(sql + " ORDER BY t.due_date, t.id", params).fetchall()
+
+    @staticmethod
+    def _get_task(conn: sqlite3.Connection, task_id: int) -> sqlite3.Row | None:
+        return conn.execute(TASK_SELECT + " WHERE t.id = ?", (task_id,)).fetchone()

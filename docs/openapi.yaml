@@ -30,6 +30,8 @@ tags:
     description: Mijiedarbību žurnāls (F3)
   - name: Pieprasījumi
     description: Pieprasījumi no organizācijām (F4)
+  - name: Uzdevumi
+    description: Uzdevumi un atgādinājumi (F5)
 
 paths:
   /health:
@@ -859,6 +861,221 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /tasks:
+    get:
+      tags: [Uzdevumi]
+      operationId: listTasks
+      summary: Uzdevumu saraksts ar filtriem
+      description: |
+        Pieslēgtā lietotāja uzdevumi, sakārtoti pēc termiņa, tad pēc ID (F5).
+        Vadītājs ar `team=true` redz visu lietotāju uzdevumus; darbiniekam
+        `team=true` dod 403 (N3). Aprēķinātie lauki pēc šodienas Europe/Riga.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: team
+          in: query
+          required: false
+          description: '`true` – visu lietotāju uzdevumi (tikai vadītājam)'
+          schema:
+            type: boolean
+            default: false
+        - name: done
+          in: query
+          required: false
+          description: '`true` – tikai izpildītie; `false` – tikai neizpildītie'
+          schema:
+            type: boolean
+        - name: dueWithinDays
+          in: query
+          required: false
+          description: Termiņš līdz šodien + N dienām, ieskaitot kavētos
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 365
+        - name: remindersDue
+          in: query
+          required: false
+          description: '`true` – tikai neizpildītie ar `remindOn` ≤ šodien'
+          schema:
+            type: boolean
+        - name: organizationId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: interactionId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Uzdevumi (var būt tukšs saraksts)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Uzdevumi]
+      operationId: createTask
+      summary: Izveidot uzdevumu
+      description: |
+        Izveido uzdevumu pieslēgtajam lietotājam (F5). Ja norādīts pieprasījums
+        vai mijiedarbība, organizāciju nosaka sistēma. Saistītajiem ierakstiem
+        jābūt lietotājam redzamiem (N3). Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreate'
+            example:
+              title: Nosūtīt līguma projektu
+              dueDate: '2026-10-17'
+              remindOn: '2026-10-16'
+              interactionId: 1
+      responses:
+        '201':
+          description: Uzdevums izveidots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/TaskValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tasks/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Uzdevuma ID
+        schema:
+          type: integer
+          example: 1
+    get:
+      tags: [Uzdevumi]
+      operationId: getTask
+      summary: Uzdevums pēc ID
+      description: Savs uzdevums; vadītājs redz arī citu uzdevumus (F5, N3).
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Uzdevums atrasts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Uzdevumi]
+      operationId: updateTask
+      summary: Labot uzdevumu
+      description: |
+        Aizstāj `title`, `dueDate`, `remindOn`, `done` (F5). Saites nemainās.
+        Labot drīkst tikai īpašnieks. `done` = `true` iestata `completedAt`,
+        `false` to notīra. Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskUpdate'
+            example:
+              title: Nosūtīt līguma projektu
+              dueDate: '2026-10-20'
+              remindOn: null
+              done: false
+      responses:
+        '200':
+          description: Uzdevums labots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/TaskValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tasks/{id}/complete:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Uzdevuma ID
+        schema:
+          type: integer
+          example: 1
+    post:
+      tags: [Uzdevumi]
+      operationId: completeTask
+      summary: Atzīmēt uzdevumu kā izpildītu
+      description: |
+        Iestata `done` = `true` (F5, F9 poga "Atzīmēt kā izpildītu"). Atkārtots
+        izsaukums `completedAt` nemaina. Tikai īpašniekam.
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Uzdevums izpildīts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   securitySchemes:
     sessionCookie:
@@ -1299,6 +1516,164 @@ components:
           format: date-time
           example: '2026-10-14T09:15:00.000Z'
 
+    TaskUpdate:
+      type: object
+      description: |
+        Uzdevuma dati labošanai (F5). Lauka kļūdas: `REQUIRED`,
+        `INVALID_FORMAT`, `TOO_LONG`, `AFTER_DUE_DATE` (`remindOn` pēc termiņa).
+      required: [title, dueDate, done]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Nosūtīt līguma projektu
+        dueDate:
+          type: string
+          format: date
+          example: '2026-10-17'
+        remindOn:
+          type: string
+          format: date
+          nullable: true
+          description: Datums, no kura uzdevums parādās atgādinājumos; ne vēlāk par termiņu
+          example: '2026-10-16'
+        done:
+          type: boolean
+          example: false
+
+    TaskCreate:
+      type: object
+      description: |
+        Uzdevuma dati izveidei (F5). Papildus `TaskUpdate` kļūdām: saites lauks
+        / `NOT_FOUND` (nav vai lietotājs neredz), `organizationId` / `MISMATCH`
+        (nesakrīt ar pieprasījuma vai mijiedarbības organizāciju). `done` nav
+        obligāts, noklusējums `false`.
+      required: [title, dueDate]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Nosūtīt līguma projektu
+        dueDate:
+          type: string
+          format: date
+          example: '2026-10-17'
+        remindOn:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-10-16'
+        done:
+          type: boolean
+          example: false
+        organizationId:
+          type: integer
+          nullable: true
+          example: 1
+        requestId:
+          type: integer
+          nullable: true
+          example: null
+        interactionId:
+          type: integer
+          nullable: true
+          example: 1
+
+    Task:
+      type: object
+      required:
+        - id
+        - ownerId
+        - title
+        - dueDate
+        - remindOn
+        - done
+        - completedAt
+        - organizationId
+        - organizationName
+        - requestId
+        - requestTitle
+        - interactionId
+        - overdue
+        - overdueDays
+        - dueToday
+        - reminderDue
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          example: 1
+        ownerId:
+          type: integer
+          example: 1
+        title:
+          type: string
+          example: Nosūtīt līguma projektu
+        dueDate:
+          type: string
+          format: date
+          example: '2026-10-17'
+        remindOn:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-10-16'
+        done:
+          type: boolean
+          example: false
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+        organizationId:
+          type: integer
+          nullable: true
+          example: 1
+        organizationName:
+          type: string
+          nullable: true
+          example: SIA Ezermalas Ūdens
+        requestId:
+          type: integer
+          nullable: true
+          example: null
+        requestTitle:
+          type: string
+          nullable: true
+          example: null
+        interactionId:
+          type: integer
+          nullable: true
+          example: 1
+        overdue:
+          type: boolean
+          description: Nav izpildīts un `dueDate` < šodien (Europe/Riga)
+          example: false
+        overdueDays:
+          type: integer
+          minimum: 0
+          example: 0
+        dueToday:
+          type: boolean
+          description: Nav izpildīts un `dueDate` = šodien
+          example: false
+        reminderDue:
+          type: boolean
+          description: Nav izpildīts un `remindOn` ≤ šodien
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-14T09:15:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-14T09:15:00.000Z'
+
     Error:
       type: object
       description: Vienota kļūdu shēma visiem galapunktiem
@@ -1458,6 +1833,29 @@ components:
             error:
               code: NOT_FOUND
               message: Request not found
+    TaskValidationError:
+      description: Kļūdaini uzdevuma dati. Izmaiņas netiek saglabātas.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details:
+                - field: remindOn
+                  issue: AFTER_DUE_DATE
+    TaskNotFound:
+      description: Uzdevums ar šādu ID nav atrasts
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Task not found
     ValidationError:
       description: Kļūdains pieprasījums. Iesniegums netiek saglabāts.
       content:
