@@ -1,4 +1,4 @@
-"""SQLite glabātuve lietotājiem un sesijām (CR-4) un organizācijām (F1)."""
+"""SQLite glabātuve lietotājiem un sesijām (CR-4), organizācijām (F1) un mijiedarbībām (F3)."""
 
 from __future__ import annotations
 
@@ -27,11 +27,31 @@ CREATE TABLE IF NOT EXISTS organizations (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS interactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL REFERENCES organizations(id),
+    author_id INTEGER NOT NULL REFERENCES users(id),
+    occurred_on TEXT NOT NULL,
+    type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    next_step TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS interactions_by_organization
+    ON interactions (organization_id, occurred_on DESC, id DESC);
 """
 
 ORGANIZATION_COLUMNS = (
     "id, name, reg_number, address, responsible_user_id, created_at, updated_at"
 )
+
+INTERACTION_SELECT = """
+SELECT i.id, i.organization_id, o.name AS organization_name, i.author_id, i.occurred_on,
+       i.type, i.summary, i.next_step, i.created_at, i.updated_at
+FROM interactions i JOIN organizations o ON o.id = i.organization_id
+"""
+NEWEST_FIRST = " ORDER BY i.occurred_on DESC, i.id DESC"
 
 # Milisekundes, lai `updatedAt` mainītos arī pēc ātras secīgas rediģēšanas.
 NOW = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
@@ -85,6 +105,10 @@ class Database:
                 return cursor.lastrowid
         except sqlite3.IntegrityError:
             return None
+
+    def get_user(self, user_id: int) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute("SELECT id, email FROM users WHERE id = ?", (user_id,)).fetchone()
 
     def find_user(self, email: str) -> sqlite3.Row | None:
         with self.connect() as conn:
@@ -172,3 +196,54 @@ class Database:
         return conn.execute(
             f"SELECT {ORGANIZATION_COLUMNS} FROM organizations WHERE id = ?", (org_id,)
         ).fetchone()
+
+    def create_interaction(
+        self,
+        organization_id: int,
+        author_id: int,
+        occurred_on: str,
+        type: str,
+        summary: str,
+        next_step: str | None,
+    ) -> sqlite3.Row:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO interactions (organization_id, author_id, occurred_on, type, summary,"
+                f" next_step, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, {NOW}, {NOW})",
+                (organization_id, author_id, occurred_on, type, summary, next_step),
+            )
+            return self._get_interaction(conn, cursor.lastrowid)
+
+    def update_interaction(
+        self, interaction_id: int, occurred_on: str, type: str, summary: str, next_step: str | None
+    ) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE interactions SET occurred_on = ?, type = ?, summary = ?, next_step = ?,"
+                f" updated_at = {NOW} WHERE id = ?",
+                (occurred_on, type, summary, next_step, interaction_id),
+            )
+            return self._get_interaction(conn, interaction_id)
+
+    def get_interaction(self, interaction_id: int) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return self._get_interaction(conn, interaction_id)
+
+    def organization_interactions(self, organization_id: int) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return conn.execute(
+                INTERACTION_SELECT + " WHERE i.organization_id = ?" + NEWEST_FIRST,
+                (organization_id,),
+            ).fetchall()
+
+    def latest_interactions(self, author_id: int | None, limit: int) -> list[sqlite3.Row]:
+        sql, params = INTERACTION_SELECT, []
+        if author_id is not None:
+            sql += " WHERE i.author_id = ?"
+            params.append(author_id)
+        with self.connect() as conn:
+            return conn.execute(sql + NEWEST_FIRST + " LIMIT ?", (*params, limit)).fetchall()
+
+    @staticmethod
+    def _get_interaction(conn: sqlite3.Connection, interaction_id: int) -> sqlite3.Row | None:
+        return conn.execute(INTERACTION_SELECT + " WHERE i.id = ?", (interaction_id,)).fetchone()

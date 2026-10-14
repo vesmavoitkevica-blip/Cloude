@@ -47,7 +47,12 @@ function render(items) {
   rows.replaceChildren();
   for (const org of items) {
     const tr = document.createElement("tr");
-    tr.append(cell(org.name), cell(org.regNumber), cell(org.address));
+    const nameCell = document.createElement("td");
+    const link = document.createElement("a");
+    link.href = `/organizacijas/${org.id}`;
+    link.textContent = org.name;
+    nameCell.append(link);
+    tr.append(nameCell, cell(org.regNumber), cell(org.address));
     const action = document.createElement("td");
     const edit = document.createElement("button");
     edit.type = "button";
