@@ -1,7 +1,8 @@
-"""Lietotāji un lomas (CR-4, N3), organizācijas (F1), mijiedarbības (F3) un pieprasījumi (F4).
+"""Lietotāji un lomas (CR-4, N3), organizācijas (F1), mijiedarbības (F3), pieprasījumi (F4)
+un uzdevumi (F5).
 
 Palaišana: `uvicorn --factory app.main:create_app --reload`, tad atver `/register`, `/login`,
-`/organizacijas`, `/pieprasijumi` vai `/admin`.
+`/organizacijas`, `/pieprasijumi`, `/uzdevumi` vai `/admin`.
 Datu bāzes fails: vides mainīgais `AUTH_DB_PATH` (noklusējums `auth.db`).
 """
 
@@ -115,6 +116,16 @@ class RequestInput(BaseModel):
     description: Any = None
     dueDate: Any = None
     status: Any = None
+
+
+class TaskInput(BaseModel):
+    title: Any = None
+    dueDate: Any = None
+    remindOn: Any = None
+    done: Any = None
+    organizationId: Any = None
+    requestId: Any = None
+    interactionId: Any = None
 
 
 def error(status: int, code: str, message: str, details: list[dict] | None = None):
@@ -304,13 +315,7 @@ def check_request(
         elif find_organization(org_id) is None:
             details.append({"field": "organizationId", "issue": "NOT_FOUND"})
 
-    title = data.title
-    if title is None or (isinstance(title, str) and not title.strip()):
-        details.append({"field": "title", "issue": "REQUIRED"})
-    elif not isinstance(title, str):
-        details.append({"field": "title", "issue": "INVALID_FORMAT"})
-    elif len(title.strip()) > MAX_TITLE_LENGTH:
-        details.append({"field": "title", "issue": "TOO_LONG"})
+    title = check_title(data.title, details)
 
     description = data.description
     if description is not None and not isinstance(description, str):
@@ -336,7 +341,7 @@ def check_request(
         details.append({"field": "status", "issue": "INVALID_FORMAT"})
 
     values = {
-        "title": title.strip() if isinstance(title, str) else title,
+        "title": title,
         "description": description,
         "due_date": due_date,
         "status": status,
@@ -362,6 +367,83 @@ def request_json(row, on: date) -> dict[str, Any]:
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
     }
+
+
+def check_title(value: Any, details: list[dict]) -> Any:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        details.append({"field": "title", "issue": "REQUIRED"})
+    elif not isinstance(value, str):
+        details.append({"field": "title", "issue": "INVALID_FORMAT"})
+    elif len(value.strip()) > MAX_TITLE_LENGTH:
+        details.append({"field": "title", "issue": "TOO_LONG"})
+    else:
+        return value.strip()
+    return value
+
+
+def check_task_fields(data: TaskInput, creating: bool) -> tuple[dict[str, Any], list[dict]]:
+    """Uzdevuma pamatlauki (F5); saites pārbauda maršruts, jo tām vajag lietotāja tiesības."""
+    details: list[dict] = []
+    title = check_title(data.title, details)
+
+    due_date = data.dueDate
+    due = None
+    if due_date is None or due_date == "":
+        details.append({"field": "dueDate", "issue": "REQUIRED"})
+    elif (due := parse_date(due_date)) is None:
+        details.append({"field": "dueDate", "issue": "INVALID_FORMAT"})
+
+    remind_on = data.remindOn
+    if remind_on == "":
+        remind_on = None
+    if remind_on is not None:
+        if (remind := parse_date(remind_on)) is None:
+            details.append({"field": "remindOn", "issue": "INVALID_FORMAT"})
+        elif due is not None and remind > due:
+            details.append({"field": "remindOn", "issue": "AFTER_DUE_DATE"})
+
+    done = data.done
+    if done is None:
+        if creating:
+            done = False
+        else:
+            details.append({"field": "done", "issue": "REQUIRED"})
+    elif not isinstance(done, bool):
+        details.append({"field": "done", "issue": "INVALID_FORMAT"})
+
+    values = {"title": title, "due_date": due_date, "remind_on": remind_on, "done": done}
+    return values, details
+
+
+def task_json(row, on: date) -> dict[str, Any]:
+    due = date.fromisoformat(row["due_date"])
+    done = bool(row["done"])
+    overdue_days = (on - due).days if not done and due < on else 0
+    remind = row["remind_on"]
+    return {
+        "id": row["id"],
+        "ownerId": row["owner_id"],
+        "title": row["title"],
+        "dueDate": row["due_date"],
+        "remindOn": remind,
+        "done": done,
+        "completedAt": row["completed_at"],
+        "organizationId": row["organization_id"],
+        "organizationName": row["organization_name"],
+        "requestId": row["request_id"],
+        "requestTitle": row["request_title"],
+        "interactionId": row["interaction_id"],
+        "overdue": overdue_days > 0,
+        "overdueDays": overdue_days,
+        "dueToday": not done and due == on,
+        "reminderDue": not done and remind is not None and date.fromisoformat(remind) <= on,
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def task_not_found() -> JSONResponse:
+    return error(404, "NOT_FOUND", "Task not found")
 
 
 def request_not_found() -> JSONResponse:
@@ -435,6 +517,46 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def visible_request(user: User, request_id: int):
         row = db.get_request(request_id) if is_valid_id(request_id) else None
         return row if row and user.can_see(row["organization_responsible_id"]) else None
+
+    def visible_task(user: User, task_id: int):
+        row = db.get_task(task_id) if is_valid_id(task_id) else None
+        return row if row and (user.sees_all or row["owner_id"] == user.id) else None
+
+    def check_task_links(user: User, data: TaskInput) -> tuple[dict[str, Any], list[dict]]:
+        """Saites uz organizāciju, pieprasījumu, mijiedarbību; tām jābūt lietotājam redzamām."""
+        details: list[dict] = []
+        found: dict[str, Any] = {}
+        lookups = {
+            "organizationId": visible_organization,
+            "requestId": visible_request,
+            "interactionId": visible_interaction,
+        }
+        for field, lookup in lookups.items():
+            value = getattr(data, field)
+            if value is None:
+                continue
+            if not isinstance(value, int) or isinstance(value, bool):
+                details.append({"field": field, "issue": "INVALID_FORMAT"})
+            elif (row := lookup(user, value)) is None:
+                details.append({"field": field, "issue": "NOT_FOUND"})
+            else:
+                found[field] = row
+
+        org_id = found["organizationId"]["id"] if "organizationId" in found else None
+        for field in ("requestId", "interactionId"):
+            if field in found:
+                linked_org = found[field]["organization_id"]
+                if org_id is not None and org_id != linked_org:
+                    details.append({"field": "organizationId", "issue": "MISMATCH"})
+                    break
+                org_id = linked_org
+
+        links = {
+            "organization_id": org_id,
+            "request_id": data.requestId if "requestId" in found else None,
+            "interaction_id": data.interactionId if "interactionId" in found else None,
+        }
+        return links, details
 
     def own_scope(user: User, mine: bool) -> int | None:
         """Atbildīgā filtrs sarakstiem: darbiniekam vienmēr savs, vadītājam pēc `mine`."""
@@ -674,6 +796,72 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return validation_error(details)
         return request_json(db.update_request(id, **values), today())
 
+    # --- Uzdevumi (F5) ---
+
+    @app.get("/tasks")
+    def list_tasks(
+        team: bool = False,
+        done: bool | None = None,
+        dueWithinDays: int | None = Query(None, ge=0, le=365),
+        remindersDue: bool | None = None,
+        organizationId: int | None = None,
+        interactionId: int | None = None,
+        user: User = Depends(require_staff),
+    ):
+        if team and not user.sees_all:
+            return forbidden()
+        if any(v is not None and not is_valid_id(v) for v in (organizationId, interactionId)):
+            return []
+        on = today()
+        rows = db.search_tasks(
+            today=on.isoformat(),
+            owner_id=None if team else user.id,
+            done=done,
+            due_until=(on + timedelta(days=dueWithinDays)).isoformat()
+            if dueWithinDays is not None
+            else None,
+            reminders_due=remindersDue,
+            organization_id=organizationId,
+            interaction_id=interactionId,
+        )
+        return [task_json(row, on) for row in rows]
+
+    @app.post("/tasks", status_code=201)
+    def create_task(data: TaskInput, user: User = Depends(require_staff)):
+        values, details = check_task_fields(data, creating=True)
+        links, link_details = check_task_links(user, data)
+        details += link_details
+        if details:
+            return validation_error(details)
+        row = db.create_task(owner_id=user.id, **values, **links)
+        return JSONResponse(status_code=201, content=task_json(row, today()))
+
+    @app.get("/tasks/{id}")
+    def get_task(id: int, user: User = Depends(require_staff)):
+        row = visible_task(user, id)
+        return task_json(row, today()) if row else task_not_found()
+
+    @app.put("/tasks/{id}")
+    def update_task(id: int, data: TaskInput, user: User = Depends(require_staff)):
+        existing = visible_task(user, id)
+        if existing is None:
+            return task_not_found()
+        if existing["owner_id"] != user.id:
+            return forbidden()
+        values, details = check_task_fields(data, creating=False)
+        if details:
+            return validation_error(details)
+        return task_json(db.update_task(id, **values), today())
+
+    @app.post("/tasks/{id}/complete")
+    def complete_task(id: int, user: User = Depends(require_staff)):
+        existing = visible_task(user, id)
+        if existing is None:
+            return task_not_found()
+        if existing["owner_id"] != user.id:
+            return forbidden()
+        return task_json(db.complete_task(id), today())
+
     # --- Lapas ---
 
     def page(request: Request, filename: str, roles: tuple[str, ...]):
@@ -696,6 +884,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/organizacijas", include_in_schema=False)
     def organizations_page(request: Request):
         return page(request, "organizations.html", STAFF_ROLES)
+
+    @app.get("/uzdevumi", include_in_schema=False)
+    def tasks_page(request: Request):
+        return page(request, "tasks.html", STAFF_ROLES)
 
     @app.get("/admin", include_in_schema=False)
     def admin_page(request: Request):

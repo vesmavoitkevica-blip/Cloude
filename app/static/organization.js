@@ -66,7 +66,15 @@ function renderHistory(items) {
     const heading = document.createElement("h3");
     heading.textContent = `${formatDate(item.occurredOn)} · ${TYPES[item.type] || item.type}`;
     li.append(heading, paragraph("Kopsavilkums", item.summary));
-    if (item.nextStep) li.append(paragraph("Nākamais solis", item.nextStep));
+    if (item.nextStep) {
+      li.append(paragraph("Nākamais solis", item.nextStep));
+      // Uzdevums no nākamā soļa (F5); nosaukums un saite aizpildās formā.
+      const task = document.createElement("a");
+      task.href = `/uzdevumi?${new URLSearchParams({ title: item.nextStep.slice(0, 200), interactionId: item.id })}`;
+      task.textContent = "Izveidot uzdevumu";
+      task.setAttribute("aria-label", `Izveidot uzdevumu: ${item.nextStep}`);
+      li.append(task, " ");
+    }
     if (me && item.authorId === me.id) {
       const edit = document.createElement("button");
       edit.type = "button";
