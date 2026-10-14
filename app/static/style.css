@@ -33,3 +33,9 @@ select, textarea { width: 100%; box-sizing: border-box; padding: 8px; margin-top
 .history h3 { margin: 0 0 6px; font-size: 1em; }
 .history p { margin: 4px 0; white-space: pre-line; }
 .history button { width: auto; margin-top: 6px; padding: 6px 10px; }
+
+/* F4: pieprasījumi */
+fieldset { border: 1px solid #d0d4da; margin-top: 12px; }
+fieldset label.inline { margin-right: 12px; }
+.overdue { color: #b00020; }
+.requests { padding-left: 20px; }

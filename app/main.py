@@ -1,7 +1,7 @@
-"""Lietotāju reģistrācija un pieteikšanās (CR-4), organizācijas (F1) un mijiedarbības (F3).
+"""Lietotāji (CR-4), organizācijas (F1), mijiedarbības (F3) un pieprasījumi (F4).
 
-Palaišana: `uvicorn --factory app.main:create_app --reload`, tad atver `/register`, `/login`
-vai `/organizacijas`.
+Palaišana: `uvicorn --factory app.main:create_app --reload`, tad atver `/register`, `/login`,
+`/organizacijas` vai `/pieprasijumi`.
 Datu bāzes fails: vides mainīgais `AUTH_DB_PATH` (noklusējums `auth.db`).
 """
 
@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -43,6 +43,10 @@ DATE_PATTERN = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 INTERACTION_TYPES = ("CALL", "EMAIL", "MEETING")
 MAX_SUMMARY_LENGTH = 2000
 MAX_NEXT_STEP_LENGTH = 500
+REQUEST_STATUSES = ("NEW", "IN_PROGRESS", "ANSWERED")
+RequestStatus = Literal["NEW", "IN_PROGRESS", "ANSWERED"]
+MAX_TITLE_LENGTH = 200
+MAX_DESCRIPTION_LENGTH = 2000
 LOCAL_TIMEZONE = ZoneInfo("Europe/Riga")
 
 
@@ -73,6 +77,14 @@ class InteractionInput(BaseModel):
     type: Any = None
     summary: Any = None
     nextStep: Any = None
+
+
+class RequestInput(BaseModel):
+    organizationId: Any = None
+    title: Any = None
+    description: Any = None
+    dueDate: Any = None
+    status: Any = None
 
 
 def error(status: int, code: str, message: str, details: list[dict] | None = None):
@@ -160,20 +172,26 @@ def check_organization(
     return values, details
 
 
+def parse_date(value: Any) -> date | None:
+    """ISO datums `GGGG-MM-DD` vai None, ja formāts vai pats datums nav derīgs."""
+    if not isinstance(value, str) or not DATE_PATTERN.match(value):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def check_interaction(data: InteractionInput) -> tuple[dict[str, Any], list[dict]]:
     details: list[dict] = []
 
     occurred_on = data.occurredOn
     if occurred_on is None or occurred_on == "":
         details.append({"field": "occurredOn", "issue": "REQUIRED"})
-    else:
-        try:
-            if not isinstance(occurred_on, str) or not DATE_PATTERN.match(occurred_on):
-                raise ValueError
-            if date.fromisoformat(occurred_on) > today():
-                details.append({"field": "occurredOn", "issue": "IN_FUTURE"})
-        except ValueError:
-            details.append({"field": "occurredOn", "issue": "INVALID_FORMAT"})
+    elif (parsed := parse_date(occurred_on)) is None:
+        details.append({"field": "occurredOn", "issue": "INVALID_FORMAT"})
+    elif parsed > today():
+        details.append({"field": "occurredOn", "issue": "IN_FUTURE"})
 
     kind = data.type
     if kind is None or kind == "":
@@ -219,6 +237,84 @@ def interaction_json(row) -> dict[str, Any]:
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
     }
+
+
+def check_request(
+    data: RequestInput, db: Database, creating: bool
+) -> tuple[dict[str, Any], list[dict]]:
+    details: list[dict] = []
+
+    if creating:
+        org_id = data.organizationId
+        if org_id is None:
+            details.append({"field": "organizationId", "issue": "REQUIRED"})
+        elif not isinstance(org_id, int) or isinstance(org_id, bool):
+            details.append({"field": "organizationId", "issue": "INVALID_FORMAT"})
+        elif not is_valid_id(org_id) or db.get_organization(org_id) is None:
+            details.append({"field": "organizationId", "issue": "NOT_FOUND"})
+
+    title = data.title
+    if title is None or (isinstance(title, str) and not title.strip()):
+        details.append({"field": "title", "issue": "REQUIRED"})
+    elif not isinstance(title, str):
+        details.append({"field": "title", "issue": "INVALID_FORMAT"})
+    elif len(title.strip()) > MAX_TITLE_LENGTH:
+        details.append({"field": "title", "issue": "TOO_LONG"})
+
+    description = data.description
+    if description is not None and not isinstance(description, str):
+        details.append({"field": "description", "issue": "INVALID_FORMAT"})
+    else:
+        description = optional_text(description)
+        if description is not None and len(description) > MAX_DESCRIPTION_LENGTH:
+            details.append({"field": "description", "issue": "TOO_LONG"})
+
+    due_date = data.dueDate
+    if due_date is None or due_date == "":
+        details.append({"field": "dueDate", "issue": "REQUIRED"})
+    elif parse_date(due_date) is None:
+        details.append({"field": "dueDate", "issue": "INVALID_FORMAT"})
+
+    status = data.status
+    if status is None or status == "":
+        if creating:
+            status = "NEW"
+        else:
+            details.append({"field": "status", "issue": "REQUIRED"})
+    elif status not in REQUEST_STATUSES:
+        details.append({"field": "status", "issue": "INVALID_FORMAT"})
+
+    values = {
+        "title": title.strip() if isinstance(title, str) else title,
+        "description": description,
+        "due_date": due_date,
+        "status": status,
+    }
+    if creating:
+        values["organization_id"] = data.organizationId
+    return values, details
+
+
+def request_json(row, on: date) -> dict[str, Any]:
+    due = date.fromisoformat(row["due_date"])
+    overdue_days = (on - due).days if row["status"] != "ANSWERED" and due < on else 0
+    return {
+        "id": row["id"],
+        "organizationId": row["organization_id"],
+        "organizationName": row["organization_name"],
+        "title": row["title"],
+        "description": row["description"],
+        "dueDate": row["due_date"],
+        "status": row["status"],
+        "overdue": overdue_days > 0,
+        "overdueDays": overdue_days,
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def request_not_found() -> JSONResponse:
+    return error(404, "NOT_FOUND", "Request not found")
 
 
 def interaction_not_found() -> JSONResponse:
@@ -399,6 +495,58 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if details:
             return validation_error(details)
         return interaction_json(db.update_interaction(id, **values))
+
+    @app.get("/requests")
+    def list_requests(
+        status: list[RequestStatus] | None = Query(None),
+        overdue: bool | None = None,
+        dueWithinDays: int | None = Query(None, ge=0, le=365),
+        mine: bool = False,
+        organizationId: int | None = None,
+        user_id: int = Depends(require_user),
+    ):
+        if organizationId is not None and not is_valid_id(organizationId):
+            return []
+        on = today()
+        rows = db.search_requests(
+            today=on.isoformat(),
+            statuses=status,
+            overdue=overdue,
+            due_until=(on + timedelta(days=dueWithinDays)).isoformat()
+            if dueWithinDays is not None
+            else None,
+            responsible_user_id=user_id if mine else None,
+            organization_id=organizationId,
+        )
+        return [request_json(row, on) for row in rows]
+
+    @app.post("/requests", status_code=201)
+    def create_request(data: RequestInput, user_id: int = Depends(require_user)):
+        values, details = check_request(data, db, creating=True)
+        if details:
+            return validation_error(details)
+        row = db.create_request(**values)
+        return JSONResponse(status_code=201, content=request_json(row, today()))
+
+    @app.get("/requests/{id}")
+    def get_request(id: int, user_id: int = Depends(require_user)):
+        row = db.get_request(id) if is_valid_id(id) else None
+        return request_json(row, today()) if row else request_not_found()
+
+    @app.put("/requests/{id}")
+    def update_request(id: int, data: RequestInput, user_id: int = Depends(require_user)):
+        if not is_valid_id(id) or db.get_request(id) is None:
+            return request_not_found()
+        values, details = check_request(data, db, creating=False)
+        if details:
+            return validation_error(details)
+        return request_json(db.update_request(id, **values), today())
+
+    @app.get("/pieprasijumi", include_in_schema=False)
+    def requests_page(request: Request):
+        if session_user_id(request) is None:
+            return RedirectResponse("/login", status_code=303)
+        return FileResponse(STATIC_DIR / "requests.html")
 
     @app.get("/organizacijas/{org_id:int}", include_in_schema=False)
     def organization_page(request: Request, org_id: int):

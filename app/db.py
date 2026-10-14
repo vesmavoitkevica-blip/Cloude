@@ -1,4 +1,5 @@
-"""SQLite glabātuve lietotājiem un sesijām (CR-4), organizācijām (F1) un mijiedarbībām (F3)."""
+"""SQLite glabātuve: lietotāji un sesijas (CR-4), organizācijas (F1), mijiedarbības (F3)
+un pieprasījumi (F4)."""
 
 from __future__ import annotations
 
@@ -40,6 +41,17 @@ CREATE TABLE IF NOT EXISTS interactions (
 );
 CREATE INDEX IF NOT EXISTS interactions_by_organization
     ON interactions (organization_id, occurred_on DESC, id DESC);
+CREATE TABLE IF NOT EXISTS requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL REFERENCES organizations(id),
+    title TEXT NOT NULL,
+    description TEXT,
+    due_date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS requests_by_due_date ON requests (due_date, id);
 """
 
 ORGANIZATION_COLUMNS = (
@@ -52,6 +64,14 @@ SELECT i.id, i.organization_id, o.name AS organization_name, i.author_id, i.occu
 FROM interactions i JOIN organizations o ON o.id = i.organization_id
 """
 NEWEST_FIRST = " ORDER BY i.occurred_on DESC, i.id DESC"
+
+REQUEST_SELECT = """
+SELECT r.id, r.organization_id, o.name AS organization_name, r.title, r.description,
+       r.due_date, r.status, r.created_at, r.updated_at
+FROM requests r JOIN organizations o ON o.id = r.organization_id
+"""
+# Kavēts = nav atbildēts un termiņš pirms šodienas (F9 datu noteikumi).
+REQUEST_OPEN = "r.status != 'ANSWERED'"
 
 # Milisekundes, lai `updatedAt` mainītos arī pēc ātras secīgas rediģēšanas.
 NOW = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
@@ -247,3 +267,71 @@ class Database:
     @staticmethod
     def _get_interaction(conn: sqlite3.Connection, interaction_id: int) -> sqlite3.Row | None:
         return conn.execute(INTERACTION_SELECT + " WHERE i.id = ?", (interaction_id,)).fetchone()
+
+    def create_request(
+        self,
+        organization_id: int,
+        title: str,
+        description: str | None,
+        due_date: str,
+        status: str,
+    ) -> sqlite3.Row:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO requests (organization_id, title, description, due_date, status,"
+                f" created_at, updated_at) VALUES (?, ?, ?, ?, ?, {NOW}, {NOW})",
+                (organization_id, title, description, due_date, status),
+            )
+            return self._get_request(conn, cursor.lastrowid)
+
+    def update_request(
+        self, request_id: int, title: str, description: str | None, due_date: str, status: str
+    ) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE requests SET title = ?, description = ?, due_date = ?, status = ?,"
+                f" updated_at = {NOW} WHERE id = ?",
+                (title, description, due_date, status, request_id),
+            )
+            return self._get_request(conn, request_id)
+
+    def get_request(self, request_id: int) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return self._get_request(conn, request_id)
+
+    def search_requests(
+        self,
+        today: str,
+        statuses: list[str] | None = None,
+        overdue: bool | None = None,
+        due_until: str | None = None,
+        responsible_user_id: int | None = None,
+        organization_id: int | None = None,
+    ) -> list[sqlite3.Row]:
+        """Datumi ir ISO virknes, tāpēc tos var salīdzināt kā tekstu."""
+        conditions: list[str] = []
+        params: list = []
+        if statuses:
+            conditions.append(f"r.status IN ({', '.join('?' * len(statuses))})")
+            params += statuses
+        if overdue is not None:
+            conditions.append(f"{'' if overdue else 'NOT '}({REQUEST_OPEN} AND r.due_date < ?)")
+            params.append(today)
+        if due_until is not None:
+            conditions.append(f"{REQUEST_OPEN} AND r.due_date <= ?")
+            params.append(due_until)
+        if responsible_user_id is not None:
+            conditions.append("o.responsible_user_id = ?")
+            params.append(responsible_user_id)
+        if organization_id is not None:
+            conditions.append("r.organization_id = ?")
+            params.append(organization_id)
+        sql = REQUEST_SELECT
+        if conditions:
+            sql += " WHERE " + " AND ".join(f"({c})" for c in conditions)
+        with self.connect() as conn:
+            return conn.execute(sql + " ORDER BY r.due_date, r.id", params).fetchall()
+
+    @staticmethod
+    def _get_request(conn: sqlite3.Connection, request_id: int) -> sqlite3.Row | None:
+        return conn.execute(REQUEST_SELECT + " WHERE r.id = ?", (request_id,)).fetchone()
