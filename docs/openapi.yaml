@@ -26,6 +26,8 @@ tags:
     description: Lietotāju reģistrācija un pieteikšanās (CR-4)
   - name: Organizācijas
     description: Organizāciju izveide, rediģēšana un meklēšana (F1)
+  - name: Mijiedarbības
+    description: Mijiedarbību žurnāls (F3)
 
 paths:
   /health:
@@ -198,6 +200,30 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /auth/me:
+    get:
+      tags: [Lietotāji]
+      operationId: getCurrentUser
+      summary: Pieslēgtais lietotājs
+      description: Atgriež pieslēgtā lietotāja kontu (F3). Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Pieslēgtais lietotājs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /organizations:
     get:
       tags: [Organizācijas]
@@ -345,6 +371,190 @@ paths:
           $ref: '#/components/responses/OrganizationNotFound'
         '409':
           $ref: '#/components/responses/RegNumberConflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /organizations/{id}/interactions:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Organizācijas ID
+        schema:
+          type: integer
+          example: 1
+    get:
+      tags: [Mijiedarbības]
+      operationId: listOrganizationInteractions
+      summary: Organizācijas mijiedarbību hronoloģija
+      description: |
+        Visas organizācijas mijiedarbības, jaunākās augšā: pēc `occurredOn`,
+        tad pēc pievienošanas secības (F3). Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Hronoloģija (var būt tukšs saraksts)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Interaction'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Mijiedarbības]
+      operationId: createInteraction
+      summary: Pievienot mijiedarbību
+      description: |
+        Pievieno mijiedarbību organizācijai (F3). Autors ir pieslēgtais
+        lietotājs. Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InteractionInput'
+            example:
+              occurredOn: '2026-10-14'
+              type: CALL
+              summary: Pārrunāta sadarbība ūdens kvalitātes projektā.
+              nextStep: Nosūtīt līguma projektu līdz piektdienai.
+      responses:
+        '201':
+          description: Mijiedarbība pievienota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Interaction'
+        '400':
+          $ref: '#/components/responses/InteractionValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /interactions:
+    get:
+      tags: [Mijiedarbības]
+      operationId: listInteractions
+      summary: Mijiedarbību saraksts
+      description: |
+        Mijiedarbības no visām organizācijām, jaunākās augšā (F3). F9 bloks
+        "Pēdējās mijiedarbības" izmanto `mine=true&limit=5`. Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: mine
+          in: query
+          required: false
+          description: '`true` – tikai pieslēgtā lietotāja ieraksti'
+          schema:
+            type: boolean
+            default: false
+        - name: limit
+          in: query
+          required: false
+          description: Lielākais ierakstu skaits
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Mijiedarbības (var būt tukšs saraksts)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Interaction'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /interactions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Mijiedarbības ID
+        schema:
+          type: integer
+          example: 1
+    get:
+      tags: [Mijiedarbības]
+      operationId: getInteraction
+      summary: Mijiedarbība pēc ID
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Mijiedarbība atrasta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Interaction'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/InteractionNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Mijiedarbības]
+      operationId: updateInteraction
+      summary: Labot mijiedarbību
+      description: |
+        Aizstāj visus laukus (F3). Labot drīkst tikai ieraksta autors.
+        Organizācija un autors nemainās. Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InteractionInput'
+            example:
+              occurredOn: '2026-10-13'
+              type: MEETING
+              summary: Tikšanās birojā par ūdens kvalitātes projektu.
+              nextStep: null
+      responses:
+        '200':
+          description: Mijiedarbība labota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Interaction'
+        '400':
+          $ref: '#/components/responses/InteractionValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/NotAuthor'
+        '404':
+          $ref: '#/components/responses/InteractionNotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -562,6 +772,84 @@ components:
           format: date-time
           example: '2026-10-14T09:15:00Z'
 
+    InteractionType:
+      type: string
+      description: '`CALL` Zvans · `EMAIL` E-pasts · `MEETING` Sanāksme'
+      enum: [CALL, EMAIL, MEETING]
+      example: CALL
+
+    InteractionInput:
+      type: object
+      description: |
+        Mijiedarbības dati (F3). Lauka kļūdas: `REQUIRED`, `INVALID_FORMAT`,
+        `IN_FUTURE` (datums pēc šodienas, Europe/Riga), `TOO_LONG`.
+      required: [occurredOn, type, summary]
+      properties:
+        occurredOn:
+          type: string
+          format: date
+          example: '2026-10-14'
+        type:
+          $ref: '#/components/schemas/InteractionType'
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          example: Pārrunāta sadarbība ūdens kvalitātes projektā.
+        nextStep:
+          type: string
+          nullable: true
+          maxLength: 500
+          example: Nosūtīt līguma projektu līdz piektdienai.
+
+    Interaction:
+      type: object
+      required:
+        - id
+        - organizationId
+        - organizationName
+        - authorId
+        - occurredOn
+        - type
+        - summary
+        - nextStep
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          example: 1
+        organizationId:
+          type: integer
+          example: 1
+        organizationName:
+          type: string
+          example: SIA Ezermalas Ūdens
+        authorId:
+          type: integer
+          example: 1
+        occurredOn:
+          type: string
+          format: date
+          example: '2026-10-14'
+        type:
+          $ref: '#/components/schemas/InteractionType'
+        summary:
+          type: string
+          example: Pārrunāta sadarbība ūdens kvalitātes projektā.
+        nextStep:
+          type: string
+          nullable: true
+          example: Nosūtīt līguma projektu līdz piektdienai.
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-14T09:15:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-14T09:15:00.000Z'
+
     Error:
       type: object
       description: Vienota kļūdu shēma visiem galapunktiem
@@ -653,6 +941,39 @@ components:
               details:
                 - field: regNumber
                   issue: ALREADY_EXISTS
+    InteractionValidationError:
+      description: Kļūdaini mijiedarbības dati. Izmaiņas netiek saglabātas.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details:
+                - field: occurredOn
+                  issue: IN_FUTURE
+    InteractionNotFound:
+      description: Mijiedarbība ar šādu ID nav atrasta
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Interaction not found
+    NotAuthor:
+      description: Labot drīkst tikai ieraksta autors
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: FORBIDDEN
+              message: Only the author can edit this interaction
     ValidationError:
       description: Kļūdains pieprasījums. Iesniegums netiek saglabāts.
       content:
