@@ -28,6 +28,8 @@ tags:
     description: Organizāciju izveide, rediģēšana un meklēšana (F1)
   - name: Mijiedarbības
     description: Mijiedarbību žurnāls (F3)
+  - name: Pieprasījumi
+    description: Pieprasījumi no organizācijām (F4)
 
 paths:
   /health:
@@ -558,6 +560,174 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /requests:
+    get:
+      tags: [Pieprasījumi]
+      operationId: listRequests
+      summary: Pieprasījumu saraksts ar filtriem
+      description: |
+        Pieprasījumi, sakārtoti pēc termiņa (agrākais augšā), tad pēc ID (F4).
+        Filtri apvienojas ar "un". `overdue` un `overdueDays` tiek aprēķināti
+        pēc šodienas Latvijas laikā (Europe/Riga). Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Viens vai vairāki statusi, piemēram, `status=NEW&status=IN_PROGRESS`
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/RequestStatus'
+        - name: overdue
+          in: query
+          required: false
+          description: '`true` – tikai kavētie; `false` – tikai nekavētie'
+          schema:
+            type: boolean
+        - name: dueWithinDays
+          in: query
+          required: false
+          description: Neatbildētie ar termiņu līdz šodien + N dienām, ieskaitot kavētos
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 365
+        - name: mine
+          in: query
+          required: false
+          description: '`true` – tikai organizācijas, kurām pieslēgtais lietotājs ir atbildīgais'
+          schema:
+            type: boolean
+            default: false
+        - name: organizationId
+          in: query
+          required: false
+          description: Tikai šīs organizācijas pieprasījumi
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Pieprasījumi (var būt tukšs saraksts)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Request'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Pieprasījumi]
+      operationId: createRequest
+      summary: Reģistrēt pieprasījumu
+      description: |
+        Reģistrē organizācijas pieprasījumu (F4). Ja `status` nav norādīts,
+        tas ir `NEW`. Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestCreate'
+            example:
+              organizationId: 1
+              title: Informācija par ūdens kvalitātes mērījumiem
+              description: Lūdz 2026. gada mērījumu rezultātus.
+              dueDate: '2026-11-13'
+      responses:
+        '201':
+          description: Pieprasījums reģistrēts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Request'
+        '400':
+          $ref: '#/components/responses/RequestValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RouteNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /requests/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Pieprasījuma ID
+        schema:
+          type: integer
+          example: 1
+    get:
+      tags: [Pieprasījumi]
+      operationId: getRequest
+      summary: Pieprasījums pēc ID
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Pieprasījums atrasts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Request'
+        '400':
+          $ref: '#/components/responses/ValidationErrorGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RequestNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Pieprasījumi]
+      operationId: updateRequest
+      summary: Labot pieprasījumu un mainīt statusu
+      description: |
+        Aizstāj `title`, `description`, `dueDate` un `status` (F4). Organizācija
+        nemainās. Labot drīkst jebkurš pieslēgts lietotājs. Vajadzīga sesija.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestUpdate'
+            example:
+              title: Informācija par ūdens kvalitātes mērījumiem
+              description: Lūdz 2026. gada mērījumu rezultātus.
+              dueDate: '2026-11-13'
+              status: IN_PROGRESS
+      responses:
+        '200':
+          description: Pieprasījums labots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Request'
+        '400':
+          $ref: '#/components/responses/RequestValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/RequestNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   securitySchemes:
     sessionCookie:
@@ -850,6 +1020,120 @@ components:
           format: date-time
           example: '2026-10-14T09:15:00.000Z'
 
+    RequestStatus:
+      type: string
+      description: '`NEW` Jauns · `IN_PROGRESS` Darbā · `ANSWERED` Atbildēts'
+      enum: [NEW, IN_PROGRESS, ANSWERED]
+      example: NEW
+
+    RequestUpdate:
+      type: object
+      description: |
+        Pieprasījuma dati labošanai (F4). Lauka kļūdas: `REQUIRED`,
+        `INVALID_FORMAT`, `TOO_LONG`. Tukša virkne laukā `description` tiek
+        saglabāta kā `null`.
+      required: [title, dueDate, status]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Informācija par ūdens kvalitātes mērījumiem
+        description:
+          type: string
+          nullable: true
+          maxLength: 2000
+          example: Lūdz 2026. gada mērījumu rezultātus.
+        dueDate:
+          type: string
+          format: date
+          example: '2026-11-13'
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+
+    RequestCreate:
+      type: object
+      description: |
+        Pieprasījuma dati reģistrēšanai (F4). Papildus `RequestUpdate` kļūdām:
+        `organizationId` / `NOT_FOUND`, ja organizācijas nav. `status` nav
+        obligāts, noklusējums `NEW`.
+      required: [organizationId, title, dueDate]
+      properties:
+        organizationId:
+          type: integer
+          example: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Informācija par ūdens kvalitātes mērījumiem
+        description:
+          type: string
+          nullable: true
+          maxLength: 2000
+          example: Lūdz 2026. gada mērījumu rezultātus.
+        dueDate:
+          type: string
+          format: date
+          example: '2026-11-13'
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+
+    Request:
+      type: object
+      required:
+        - id
+        - organizationId
+        - organizationName
+        - title
+        - description
+        - dueDate
+        - status
+        - overdue
+        - overdueDays
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          example: 1
+        organizationId:
+          type: integer
+          example: 1
+        organizationName:
+          type: string
+          example: SIA Ezermalas Ūdens
+        title:
+          type: string
+          example: Informācija par ūdens kvalitātes mērījumiem
+        description:
+          type: string
+          nullable: true
+          example: Lūdz 2026. gada mērījumu rezultātus.
+        dueDate:
+          type: string
+          format: date
+          example: '2026-11-13'
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        overdue:
+          type: boolean
+          description: '`status` ≠ `ANSWERED` un `dueDate` < šodien (Europe/Riga)'
+          example: false
+        overdueDays:
+          type: integer
+          minimum: 0
+          description: Cik dienas kavēts; 0, ja nav kavēts
+          example: 0
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-14T09:15:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-14T09:15:00.000Z'
+
     Error:
       type: object
       description: Vienota kļūdu shēma visiem galapunktiem
@@ -974,6 +1258,29 @@ components:
             error:
               code: FORBIDDEN
               message: Only the author can edit this interaction
+    RequestValidationError:
+      description: Kļūdaini pieprasījuma dati. Izmaiņas netiek saglabātas.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details:
+                - field: dueDate
+                  issue: INVALID_FORMAT
+    RequestNotFound:
+      description: Pieprasījums ar šādu ID nav atrasts
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Request not found
     ValidationError:
       description: Kļūdains pieprasījums. Iesniegums netiek saglabāts.
       content:
