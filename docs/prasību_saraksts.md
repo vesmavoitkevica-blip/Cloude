@@ -5,11 +5,11 @@
 | ID | Statuss | Prasība |
 | --- | --- | --- |
 | **F0** | ✅ done | Login un reģistrācija |
-| **F1** |  | Organizācijas: izveidot, rediģēt, meklēt |
+| **F1** | ✅ done | Organizācijas: izveidot, rediģēt, meklēt |
 | **F2** |  | Kontaktpersonas pie organizācijas |
-| **F3** |  | Mijiedarbību žurnāls |
-| **F4** |  | Pieprasījumi no organizācijām |
-| **F5** |  | Uzdevumi un atgādinājumi |
+| **F3** | ✅ done | Mijiedarbību žurnāls |
+| **F4** | ✅ done | Pieprasījumi no organizācijām |
+| **F5** | ✅ done | Uzdevumi un atgādinājumi |
 | **F6** |  | Meklēšana |
 | **F7** |  | Pārskats vadītājam |
 | **F8** |  | Piekļūstamības paziņojums |
@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | **N1** |  | Pieejamība |
 | **N2** |  | Personas dati (VDAR) |
-| **N3** |  | Lomas |
+| **N3** | ✅ done | Lomas |
 | **N4** |  | Tehnoloģijas un laiks |
 
 ## Lomu saraksts
