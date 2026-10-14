@@ -8,21 +8,23 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.db import Database
-from app.pages import LOGIN_PAGE, REGISTER_PAGE
 from app.security import DUMMY_HASH, hash_password, new_session_token, verify_password
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MIN_PASSWORD_LENGTH = 8
 SESSION_COOKIE = "session"
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 class Credentials(BaseModel):
@@ -119,12 +121,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
         result.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
         return result
 
-    @app.get("/register", response_class=HTMLResponse, include_in_schema=False)
+    @app.get("/register", include_in_schema=False)
     def register_page():
-        return REGISTER_PAGE
+        return FileResponse(STATIC_DIR / "register.html")
 
-    @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+    @app.get("/login", include_in_schema=False)
     def login_page():
-        return LOGIN_PAGE
+        return FileResponse(STATIC_DIR / "login.html")
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     return app

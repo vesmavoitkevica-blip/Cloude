@@ -155,7 +155,12 @@ def test_html_forms(client, path, endpoint):
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert 'type="password"' in response.text
-    assert f'fetch("{endpoint}"' in response.text
+    assert f'data-endpoint="{endpoint}"' in response.text
+
+
+@pytest.mark.parametrize("path", ["/static/form.js", "/static/style.css"])
+def test_form_assets_are_served(client, path):
+    assert client.get(path).status_code == 200
 
 
 def test_unknown_route_uses_error_schema(client):
