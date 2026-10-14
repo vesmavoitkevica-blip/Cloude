@@ -39,3 +39,11 @@ fieldset { border: 1px solid #d0d4da; margin-top: 12px; }
 fieldset label.inline { margin-right: 12px; }
 .overdue { color: #b00020; }
 .requests { padding-left: 20px; }
+
+/* N3: lapu galvene ar navigāciju un izrakstīšanos */
+.site-header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+               max-width: 948px; margin: 16px auto 0; }
+.site-header ul { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; margin: 0; padding: 0; }
+.site-header [aria-current="page"] { font-weight: 700; }
+.site-header #who { margin: 0 0 0 auto; }
+.site-header #logout { width: auto; margin: 0; padding: 6px 10px; }

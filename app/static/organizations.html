@@ -7,6 +7,17 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<header class="site-header">
+  <nav aria-label="Galvenā navigācija">
+    <ul>
+      <li class="staff-only"><a href="/organizacijas">Organizācijas</a></li>
+      <li class="staff-only"><a href="/pieprasijumi">Pieprasījumi</a></li>
+      <li class="admin-only" hidden><a href="/admin">Administrēšana</a></li>
+    </ul>
+  </nav>
+  <p id="who"></p>
+  <button type="button" id="logout">Izrakstīties</button>
+</header>
 <main class="wide">
   <h1>Organizācijas</h1>
 
@@ -56,6 +67,12 @@
       <input id="address" name="address" maxlength="300" aria-describedby="address-error">
       <div class="field-error" id="address-error"></div>
 
+      <div id="responsible-field" hidden>
+        <label for="responsibleUserId">Atbildīgais darbinieks</label>
+        <select id="responsibleUserId" aria-describedby="responsibleUserId-error"></select>
+        <div class="field-error" id="responsibleUserId-error"></div>
+      </div>
+
       <button type="submit" id="save">Saglabāt</button>
       <button type="button" id="cancel" hidden>Atcelt rediģēšanu</button>
     </form>
@@ -63,6 +80,7 @@
 
   <p id="message" role="status"></p>
 </main>
+<script src="/static/nav.js"></script>
 <script src="/static/organizations.js"></script>
 </body>
 </html>

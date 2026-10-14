@@ -1,4 +1,4 @@
-"""SQLite glabātuve: lietotāji un sesijas (CR-4), organizācijas (F1), mijiedarbības (F3)
+"""SQLite glabātuve: lietotāji un sesijas (CR-4, N3), organizācijas (F1), mijiedarbības (F3)
 un pieprasījumi (F4)."""
 
 from __future__ import annotations
@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    name TEXT,
+    role TEXT NOT NULL DEFAULT 'EMPLOYEE'
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -54,19 +56,33 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE INDEX IF NOT EXISTS requests_by_due_date ON requests (due_date, id);
 """
 
+# Kolonnas, kas pievienotas pēc tabulas izveides; vecām datu bāzēm tās pievieno ar ALTER TABLE.
+USER_MIGRATIONS = {
+    "name": "ALTER TABLE users ADD COLUMN name TEXT",
+    "role": "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'EMPLOYEE'",
+}
+USER_COLUMNS = "id, email, name, role"
+
+
+class LastAdmin(Exception):
+    """Vienīgajam administratoram nevar noņemt lomu."""
+
+
 ORGANIZATION_COLUMNS = (
     "id, name, reg_number, address, responsible_user_id, created_at, updated_at"
 )
 
 INTERACTION_SELECT = """
-SELECT i.id, i.organization_id, o.name AS organization_name, i.author_id, i.occurred_on,
+SELECT i.id, i.organization_id, o.name AS organization_name,
+       o.responsible_user_id AS organization_responsible_id, i.author_id, i.occurred_on,
        i.type, i.summary, i.next_step, i.created_at, i.updated_at
 FROM interactions i JOIN organizations o ON o.id = i.organization_id
 """
 NEWEST_FIRST = " ORDER BY i.occurred_on DESC, i.id DESC"
 
 REQUEST_SELECT = """
-SELECT r.id, r.organization_id, o.name AS organization_name, r.title, r.description,
+SELECT r.id, r.organization_id, o.name AS organization_name,
+       o.responsible_user_id AS organization_responsible_id, r.title, r.description,
        r.due_date, r.status, r.created_at, r.updated_at
 FROM requests r JOIN organizations o ON o.id = r.organization_id
 """
@@ -101,6 +117,10 @@ class Database:
         self.path = path
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            existing = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+            for column, statement in USER_MIGRATIONS.items():
+                if column not in existing:
+                    conn.execute(statement)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -114,26 +134,55 @@ class Database:
         finally:
             conn.close()
 
-    def create_user(self, email: str, password_hash: str) -> int | None:
-        """Atgriež jaunā lietotāja ID vai None, ja e-pasts jau ir reģistrēts."""
+    def create_user(
+        self, email: str, password_hash: str, name: str | None = None
+    ) -> sqlite3.Row | None:
+        """Atgriež jauno lietotāju vai None, ja e-pasts jau ir reģistrēts."""
         try:
             with self.connect() as conn:
                 cursor = conn.execute(
-                    "INSERT INTO users (email, password_hash) VALUES (?, ?)",
-                    (email, password_hash),
+                    "INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)",
+                    (email, password_hash, name),
                 )
-                return cursor.lastrowid
+                return conn.execute(
+                    f"SELECT {USER_COLUMNS} FROM users WHERE id = ?", (cursor.lastrowid,)
+                ).fetchone()
         except sqlite3.IntegrityError:
             return None
 
     def get_user(self, user_id: int) -> sqlite3.Row | None:
         with self.connect() as conn:
-            return conn.execute("SELECT id, email FROM users WHERE id = ?", (user_id,)).fetchone()
+            return conn.execute(f"SELECT {USER_COLUMNS} FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    def find_user_id(self, email: str) -> int | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+        return row["id"] if row else None
+
+    def list_users(self) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return conn.execute(f"SELECT {USER_COLUMNS} FROM users ORDER BY email").fetchall()
+
+    def set_role(self, user_id: int, role: str) -> sqlite3.Row | None:
+        """Atgriež atjaunoto lietotāju vai None, ja tāda nav. LastAdmin, ja tas ir pēdējais."""
+        with self.connect() as conn:
+            # Pārbaude un maiņa vienā transakcijā, lai divi vienlaicīgi pieprasījumi
+            # nevarētu noņemt lomu abiem pēdējiem administratoriem.
+            conn.execute("BEGIN IMMEDIATE")
+            user = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+            if user is None:
+                return None
+            if user["role"] == "ADMIN" and role != "ADMIN":
+                (admins,) = conn.execute("SELECT COUNT(*) FROM users WHERE role = 'ADMIN'").fetchone()
+                if admins <= 1:
+                    raise LastAdmin
+            conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+            return conn.execute(f"SELECT {USER_COLUMNS} FROM users WHERE id = ?", (user_id,)).fetchone()
 
     def find_user(self, email: str) -> sqlite3.Row | None:
         with self.connect() as conn:
             return conn.execute(
-                "SELECT id, email, password_hash FROM users WHERE email = ?", (email,)
+                f"SELECT {USER_COLUMNS}, password_hash FROM users WHERE email = ?", (email,)
             ).fetchone()
 
     def create_session(self, token_hash: str, user_id: int) -> None:
@@ -143,16 +192,18 @@ class Database:
                 (token_hash, user_id),
             )
 
-    def find_session_user_id(self, token_hash: str) -> int | None:
+    def find_session_user(self, token_hash: str) -> sqlite3.Row | None:
+        """Sesijas lietotājs ar pašreizējo lomu (loma netiek kopēta sesijā, N3)."""
         with self.connect() as conn:
-            row = conn.execute(
-                "SELECT user_id FROM sessions WHERE token_hash = ?", (token_hash,)
+            return conn.execute(
+                "SELECT u.id, u.email, u.name, u.role FROM sessions s"
+                " JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
+                (token_hash,),
             ).fetchone()
-        return row["user_id"] if row else None
 
-    def user_exists(self, user_id: int) -> bool:
+    def delete_session(self, token_hash: str) -> None:
         with self.connect() as conn:
-            return conn.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is not None
+            conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
 
     def create_organization(
         self, name: str, reg_number: str | None, address: str | None, responsible_user_id: int
@@ -256,11 +307,17 @@ class Database:
                 (organization_id,),
             ).fetchall()
 
-    def latest_interactions(self, author_id: int | None, limit: int) -> list[sqlite3.Row]:
-        sql, params = INTERACTION_SELECT, []
+    def latest_interactions(
+        self, author_id: int | None, limit: int, responsible_user_id: int | None = None
+    ) -> list[sqlite3.Row]:
+        conditions, params = [], []
         if author_id is not None:
-            sql += " WHERE i.author_id = ?"
+            conditions.append("i.author_id = ?")
             params.append(author_id)
+        if responsible_user_id is not None:
+            conditions.append("o.responsible_user_id = ?")
+            params.append(responsible_user_id)
+        sql = INTERACTION_SELECT + (" WHERE " + " AND ".join(conditions) if conditions else "")
         with self.connect() as conn:
             return conn.execute(sql + NEWEST_FIRST + " LIMIT ?", (*params, limit)).fetchall()
 

@@ -20,7 +20,9 @@ const fields = {
   name: document.getElementById("name"),
   regNumber: document.getElementById("regNumber"),
   address: document.getElementById("address"),
+  responsibleUserId: document.getElementById("responsibleUserId"),
 };
+let isManager = false;
 
 function show(text, kind) {
   message.textContent = text;
@@ -89,13 +91,16 @@ function startEdit(org) {
   fields.name.value = org.name;
   fields.regNumber.value = org.regNumber || "";
   fields.address.value = org.address || "";
+  fields.responsibleUserId.value = org.responsibleUserId;
   formHeading.textContent = `Rediģēt: ${org.name}`;
   cancel.hidden = false;
   fields.name.focus();
 }
 
 function resetForm() {
+  const keepResponsible = fields.responsibleUserId.value;
   form.reset();
+  fields.responsibleUserId.value = keepResponsible;
   fields.id.value = "";
   formHeading.textContent = "Jauna organizācija";
   cancel.hidden = true;
@@ -104,7 +109,25 @@ function resetForm() {
 
 search.addEventListener("submit", (event) => {
   event.preventDefault();
-  load();
+  // Vadītājs redz atbildīgā izvēli; saraksts no /users (tikai darbinieki un vadītāji).
+async function setupResponsible() {
+  const me = await currentUser;
+  if (!me || me.role !== "MANAGER") return;
+  const { response, data } = await call("/users");
+  if (!response.ok) return;
+  for (const user of data.filter((u) => u.role !== "ADMIN")) {
+    const option = document.createElement("option");
+    option.value = user.id;
+    option.textContent = user.name || user.email;
+    fields.responsibleUserId.append(option);
+  }
+  fields.responsibleUserId.value = me.id;
+  document.getElementById("responsible-field").hidden = false;
+  isManager = true;
+}
+
+setupResponsible().catch(() => {});
+load();
 });
 
 cancel.addEventListener("click", () => {
@@ -123,6 +146,10 @@ form.addEventListener("submit", async (event) => {
     regNumber: fields.regNumber.value,
     address: fields.address.value,
   };
+  // Atbildīgo var norādīt tikai vadītājs (N3); darbiniekam serveris to nosaka pats.
+  if (isManager && fields.responsibleUserId.value) {
+    body.responsibleUserId = Number(fields.responsibleUserId.value);
+  }
 
   let result;
   try {

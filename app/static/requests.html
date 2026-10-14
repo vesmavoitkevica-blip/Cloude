@@ -7,6 +7,17 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<header class="site-header">
+  <nav aria-label="Galvenā navigācija">
+    <ul>
+      <li class="staff-only"><a href="/organizacijas">Organizācijas</a></li>
+      <li class="staff-only"><a href="/pieprasijumi">Pieprasījumi</a></li>
+      <li class="admin-only" hidden><a href="/admin">Administrēšana</a></li>
+    </ul>
+  </nav>
+  <p id="who"></p>
+  <button type="button" id="logout">Izrakstīties</button>
+</header>
 <main class="wide">
   <h1>Pieprasījumi</h1>
 
@@ -85,6 +96,7 @@
 
   <p id="message" role="status"></p>
 </main>
+<script src="/static/nav.js"></script>
 <script src="/static/requests.js"></script>
 </body>
 </html>

@@ -53,8 +53,9 @@ def test_create_with_name_only(client):
     assert body["createdAt"] == body["updatedAt"]
 
 
-def test_create_with_all_fields(app, client):
+def test_create_with_all_fields(app, client, set_role):
     other = logged_in(app, "anna@example.com")
+    set_role(client.user_id, "MANAGER")  # citu atbildīgo norāda vadītājs (N3)
     response = create(
         client, regNumber="40003000001", address="Ezera iela 1", responsibleUserId=other.user_id
     )
@@ -159,8 +160,9 @@ def test_responsible_user_must_exist(client, user_id, issue):
 
 
 # F1-7
-def test_update(app, client):
+def test_update(app, client, set_role):
     other = logged_in(app, "anna@example.com")
+    set_role(client.user_id, "MANAGER")  # atbildīgo maina vadītājs (N3)
     org = create(client, regNumber="40003000001", address="Ezera iela 1").json()
     time.sleep(0.01)
     response = client.put(
@@ -251,13 +253,15 @@ def test_search_without_results(client):
 
 
 # F1-11
-def test_mine_filter(app, client):
-    other = logged_in(app, "anna@example.com")
+def test_mine_filter(app, client, set_role):
+    anna = logged_in(app, "anna@example.com")
+    set_role(client.user_id, "MANAGER")
     create(client, name="Mana")
-    create(other, name="Annas")
-    create(other, name="Annas, bet man", responsibleUserId=client.user_id)
-    assert names(client.get("/organizations", params={"mine": "true"})) == ["Annas, bet man", "Mana"]
+    create(client, name="Annai", responsibleUserId=anna.user_id)
+    create(anna, name="Annas")
+    assert names(client.get("/organizations", params={"mine": "true"})) == ["Mana"]
     assert len(client.get("/organizations").json()) == 3
+    assert names(anna.get("/organizations")) == ["Annai", "Annas"]
 
 
 def test_mine_must_be_boolean(client):

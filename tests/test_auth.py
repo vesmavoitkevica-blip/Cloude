@@ -35,7 +35,7 @@ def test_register_valid_returns_user_without_password(client):
     response = register(client)
     assert response.status_code == 201
     body = response.json()
-    assert body == {"id": body["id"], "email": EMAIL}
+    assert body == {"id": body["id"], "email": EMAIL, "name": None, "role": "EMPLOYEE"}
 
 
 # 2

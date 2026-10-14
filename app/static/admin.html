@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="lv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administrēšana</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="site-header">
+  <nav aria-label="Galvenā navigācija">
+    <ul>
+      <li class="admin-only"><a href="/admin">Administrēšana</a></li>
+    </ul>
+  </nav>
+  <p id="who"></p>
+  <button type="button" id="logout">Izrakstīties</button>
+</header>
+<main class="wide">
+  <h1>Administrēšana</h1>
+
+  <section aria-labelledby="users-heading">
+    <h2 id="users-heading">Lietotāji un lomas</h2>
+    <p>Jaunā loma stājas spēkā lietotāja nākamajā darbībā; atkārtoti pieslēgties nav jāpiesakās.</p>
+    <div class="table-scroll">
+      <table>
+        <caption>Lietotāji</caption>
+        <thead>
+          <tr>
+            <th scope="col">E-pasts</th>
+            <th scope="col">Vārds</th>
+            <th scope="col">Loma</th>
+            <th scope="col">Darbība</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <p id="message" role="status"></p>
+</main>
+<script src="/static/nav.js"></script>
+<script src="/static/admin.js"></script>
+</body>
+</html>

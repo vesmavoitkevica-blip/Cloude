@@ -23,6 +23,7 @@ const fields = {
   nextStep: document.getElementById("nextStep"),
 };
 let me = null;
+let responsibleId = null;
 
 function show(text, kind) {
   message.textContent = text;
@@ -111,6 +112,7 @@ async function load() {
       show("Neizdevās ielādēt organizāciju.", "fail");
       return;
     }
+    responsibleId = org.data.responsibleUserId;
     document.getElementById("org-name").textContent = org.data.name;
     document.title = `${org.data.name} – Organizācija`;
     document.getElementById("org-reg").textContent = org.data.regNumber || "—";
@@ -118,7 +120,12 @@ async function load() {
     document.getElementById("new-request").href = `/pieprasijumi?organizationId=${orgId}`;
     document.getElementById("card").hidden = false;
 
-    me = (await call("/auth/me")).data;
+    me = await currentUser;
+    // Reģistrē tikai organizācijas atbildīgais (N3); labot savus ierakstus var arī pēc tam.
+    if (!me || org.data.responsibleUserId !== me.id) {
+      form.hidden = true;
+      document.getElementById("not-responsible").hidden = false;
+    }
     await Promise.all([loadHistory(), loadRequests()]);
   } catch (err) {
     if (err.message !== "unauthorized") show("Neizdevās sazināties ar serveri.", "fail");
@@ -130,6 +137,7 @@ function clearErrors() {
 }
 
 function resetForm() {
+  if (me && me.id !== responsibleId) form.hidden = true;
   form.reset();
   fields.id.value = "";
   fields.occurredOn.value = localToday();
@@ -140,6 +148,7 @@ function resetForm() {
 
 function startEdit(item) {
   clearErrors();
+  form.hidden = false;
   fields.id.value = item.id;
   fields.occurredOn.value = item.occurredOn;
   fields.type.value = item.type;
