@@ -43,7 +43,11 @@ def verify_password(password: str, stored: str) -> bool:
 DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
 
 
+def hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def new_session_token() -> tuple[str, str]:
     """Atgriež (marķieris sīkdatnei, tā jaucējvērtība datu bāzei)."""
     token = secrets.token_urlsafe(32)
-    return token, hashlib.sha256(token.encode("ascii")).hexdigest()
+    return token, hash_session_token(token)

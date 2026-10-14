@@ -8,3 +8,16 @@ button { margin-top: 20px; width: 100%; padding: 10px; cursor: pointer; }
 #message { margin-top: 16px; }
 #message.ok { color: #1b5e20; }
 #message.fail { color: #b00020; }
+
+/* F1: organizāciju lapa */
+main.wide { max-width: 900px; margin: 4vh auto; }
+h2 { margin-top: 28px; font-size: 1.2em; }
+label.inline { display: inline-flex; gap: 6px; align-items: center; font-weight: normal; }
+label.inline input { width: auto; margin: 0; }
+td button, #cancel { width: auto; margin-top: 0; padding: 6px 10px; }
+#cancel { margin-top: 12px; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+caption { text-align: left; font-weight: 600; padding-bottom: 8px; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid #d0d4da; }
+:focus-visible { outline: 3px solid #1a56db; outline-offset: 2px; }
