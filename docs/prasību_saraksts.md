@@ -100,7 +100,7 @@ Palaišana: `uvicorn --factory app.main:create_app --reload`.
 | Organizācijas | Kontakta forma | — | F2 | Darbinieks, vadītājs | Plānots |
 | Darbs | Mijiedarbība + MI-1 kopsavilkums | `/organizacijas/{id}` | F3, MI-1 | Darbinieks, vadītājs | Mijiedarbība ir; MI-1 plānots |
 | Darbs | Pieprasījumi, statusi | `/pieprasijumi` | F4 | Darbinieks, vadītājs | Ir |
-| Darbs | Mani uzdevumi | — | F5 | Darbinieks, vadītājs | Plānots |
+| Darbs | Mani uzdevumi, atgādinājumi | `/uzdevumi` | F5 | Darbinieks, vadītājs | Ir |
 | Vadība | Pārskats: tabula, diagramma | — | F7 | Vadītājs | Plānots |
 | Administrēšana | Lomas, dzēšana, piekļuves žurnāls | `/admin` | N2, N3 | Administrators | Lomas ir (N3); dzēšana un piekļuves žurnāls plānoti (N2) |
 
@@ -114,7 +114,7 @@ Palaišana: `uvicorn --factory app.main:create_app --reload`.
 | `interactions` | organizācija, autors, veids, datums, kopsavilkums, nākamais solis | Ir (F3); *plānots: dalībnieki, MI marķējums* |
 | `requests` | organizācija, nosaukums, apraksts, statuss, termiņš | Ir (F4) |
 | `contacts` | vārds, amats, e-pasts, tālrunis, saziņas pamats, saziņas datums, glabāt līdz | Plānots (F2) |
-| `tasks` | nosaukums, termiņš, izpildīts, saistītā organizācija / pieprasījums | Plānots (F5) |
+| `tasks` | īpašnieks, nosaukums, termiņš, atgādināt, izpildīts, saistītā organizācija / pieprasījums / mijiedarbība | Ir (F5) |
 | `access_log` | kas, ko, kad skatīja vai mainīja | Plānots (N2) |
 
 ### MI komponents (plānots, `app/ai.py`)
