@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="lv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pieprasījumi</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="wide">
+  <h1>Pieprasījumi</h1>
+
+  <section aria-labelledby="filter-heading">
+    <h2 id="filter-heading">Filtri</h2>
+    <form id="filters">
+      <fieldset>
+        <legend>Statuss</legend>
+        <label class="inline"><input type="checkbox" name="status" value="NEW"> Jauns</label>
+        <label class="inline"><input type="checkbox" name="status" value="IN_PROGRESS"> Darbā</label>
+        <label class="inline"><input type="checkbox" name="status" value="ANSWERED"> Atbildēts</label>
+      </fieldset>
+      <label class="inline"><input type="checkbox" name="overdue" value="true"> Tikai kavētie</label>
+      <label class="inline"><input type="checkbox" name="mine" value="true"> Tikai manas organizācijas</label>
+      <input type="hidden" name="organizationId">
+      <p id="org-filter" hidden></p>
+      <button type="submit">Rādīt</button>
+    </form>
+  </section>
+
+  <section aria-labelledby="list-heading">
+    <h2 id="list-heading">Saraksts</h2>
+    <div class="table-scroll">
+      <table>
+        <caption>Pieprasījumi pēc termiņa</caption>
+        <thead>
+          <tr>
+            <th scope="col">Organizācija</th>
+            <th scope="col">Pieprasījums</th>
+            <th scope="col">Statuss</th>
+            <th scope="col">Termiņš</th>
+            <th scope="col">Darbība</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p id="empty" hidden>Nav atrasts neviens pieprasījums.</p>
+  </section>
+
+  <section aria-labelledby="form-heading">
+    <h2 id="form-heading">Reģistrēt pieprasījumu</h2>
+    <form id="form" novalidate>
+      <input type="hidden" id="request-id">
+
+      <label for="organizationId">Organizācija (obligāta)</label>
+      <select id="organizationId" required aria-describedby="organizationId-error">
+        <option value="">— izvēlieties —</option>
+      </select>
+      <div class="field-error" id="organizationId-error"></div>
+
+      <label for="title">Pieprasījums (obligāts)</label>
+      <input id="title" maxlength="200" required aria-describedby="title-error">
+      <div class="field-error" id="title-error"></div>
+
+      <label for="description">Apraksts</label>
+      <textarea id="description" rows="3" maxlength="2000" aria-describedby="description-error"></textarea>
+      <div class="field-error" id="description-error"></div>
+
+      <label for="dueDate">Termiņš (obligāts)</label>
+      <input id="dueDate" type="date" required aria-describedby="dueDate-error">
+      <div class="field-error" id="dueDate-error"></div>
+
+      <label for="status">Statuss</label>
+      <select id="status" aria-describedby="status-error">
+        <option value="NEW">Jauns</option>
+        <option value="IN_PROGRESS">Darbā</option>
+        <option value="ANSWERED">Atbildēts</option>
+      </select>
+      <div class="field-error" id="status-error"></div>
+
+      <button type="submit">Saglabāt</button>
+      <button type="button" id="cancel" hidden>Atcelt labošanu</button>
+    </form>
+  </section>
+
+  <p id="message" role="status"></p>
+</main>
+<script src="/static/requests.js"></script>
+</body>
+</html>

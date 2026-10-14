@@ -6,6 +6,7 @@ const ISSUES = {
   TOO_LONG: "Teksts ir pārāk garš.",
 };
 const TYPES = { CALL: "Zvans", EMAIL: "E-pasts", MEETING: "Sanāksme" };
+const STATUSES = { NEW: "Jauns", IN_PROGRESS: "Darbā", ANSWERED: "Atbildēts" };
 
 const orgId = Number(window.location.pathname.split("/").pop());
 const form = document.getElementById("form");
@@ -84,6 +85,21 @@ async function loadHistory() {
   else show("Neizdevās ielādēt mijiedarbības.", "fail");
 }
 
+async function loadRequests() {
+  const { response, data } = await call(`/requests?organizationId=${orgId}`);
+  if (!response.ok) return;
+  const list = document.getElementById("requests");
+  list.replaceChildren();
+  for (const item of data) {
+    const li = document.createElement("li");
+    let text = `${item.title} — ${STATUSES[item.status] || item.status}, termiņš ${formatDate(item.dueDate)}`;
+    if (item.overdue) text += ` (Kavēts, ${item.overdueDays} d.)`;
+    li.textContent = text;
+    list.append(li);
+  }
+  document.getElementById("requests-empty").hidden = data.length > 0;
+}
+
 async function load() {
   try {
     const org = await call(`/organizations/${orgId}`);
@@ -99,10 +115,11 @@ async function load() {
     document.title = `${org.data.name} – Organizācija`;
     document.getElementById("org-reg").textContent = org.data.regNumber || "—";
     document.getElementById("org-address").textContent = org.data.address || "—";
+    document.getElementById("new-request").href = `/pieprasijumi?organizationId=${orgId}`;
     document.getElementById("card").hidden = false;
 
     me = (await call("/auth/me")).data;
-    await loadHistory();
+    await Promise.all([loadHistory(), loadRequests()]);
   } catch (err) {
     if (err.message !== "unauthorized") show("Neizdevās sazināties ar serveri.", "fail");
   }
